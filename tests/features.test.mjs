@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  applyDropOrder, availableColumnTypes, canAddColumnType, canEdit, columnTypeToStatus,
-  confirmDeleteMessage, filterByProjectIds, filterTasks, isViewer, reportRows, statusToColumnType
+  accountRole, applyDropOrder, availableColumnTypes, canAddColumnType, canEdit, columnTypeToStatus,
+  confirmDeleteMessage, filterByProjectIds, filterTasks, isAdmin, isViewer, reportRows, roleCaption, statusToColumnType
 } from "../app-core.mjs";
 
 const tasks = [
@@ -55,10 +55,16 @@ test("delete confirmation names the count", () => {
   assert.match(confirmDeleteMessage(1), /Delete 1 task\?/);
 });
 
-test("view-only users cannot edit; missing role is an editor", () => {
+test("view-only users cannot edit; admin and missing role can", () => {
   assert.equal(isViewer({ role: "viewer" }), true);
+  assert.equal(isAdmin({ role: "admin" }), true);
   assert.equal(canEdit({ role: "viewer" }), false);
   assert.equal(canEdit({ role: "editor" }), true);
+  assert.equal(canEdit({ role: "admin" }), true);
   assert.equal(canEdit({}), true);
   assert.equal(canEdit(null), false);
+  assert.equal(accountRole({ role: "admin" }), "admin");
+  assert.equal(roleCaption({ role: "admin" }), "Admin");
+  assert.equal(roleCaption({ role: "viewer" }), "View only");
+  assert.equal(roleCaption({}), "Editor");
 });

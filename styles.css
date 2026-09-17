@@ -105,6 +105,8 @@ body.is-recording{padding-top:52px}
 .viewer-pill{border:2px solid var(--ink);background:#cfddff;padding:10px 12px;margin:0;font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
 .role-line{align-items:flex-start;margin-top:4px}
 .role-line small{display:block;margin-top:4px;text-transform:none;letter-spacing:0;font-family:Manrope,Arial,sans-serif;color:var(--muted);font-weight:500}
+.role-pick{border:0;padding:0;margin:8px 0 0;display:grid;gap:8px}
+.role-pick legend{padding:0;margin-bottom:4px}
 .task-dialog.is-readonly .rtf-editor{background:#f3f1e8;min-height:160px}
 .app-shell.is-viewer .task-card{cursor:pointer}
 @keyframes rec{50%{box-shadow:0 0 0 6px transparent}}

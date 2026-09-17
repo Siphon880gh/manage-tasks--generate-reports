@@ -193,9 +193,9 @@ try {
   await page.locator("#confirm-ok").click();
   await page.waitForSelector("#auth-form");
   await page.getByLabel("Display name").fill("Viewer User");
-  await page.getByLabel("Username").fill(`riley-${Date.now()}`);
+  await page.getByLabel("Username").fill(`viewer-${Date.now()}`);
   await page.getByLabel("Passphrase").fill("viewer-passphrase");
-  await page.getByLabel(/View only/).check();
+  await page.locator("#role-viewer").check();
   await page.getByRole("button", { name: /Create local account/ }).click();
   await page.waitForSelector("[data-role=viewer]");
   check("viewer shell", await page.locator(".app-shell").getAttribute("data-role") === "viewer");
@@ -218,6 +218,21 @@ try {
   await page.getByRole("button", { name: "Stakeholder pulse" }).click();
   await page.waitForSelector("text=outcome-oriented");
   check("viewer can change report lens", true);
+
+  await page.locator("#account-button").click();
+  await page.waitForSelector("#confirm-dialog[open]");
+  await page.locator("#confirm-ok").click();
+  await page.waitForSelector("#auth-form");
+  await page.getByLabel("Display name").fill("Admin User");
+  await page.getByLabel("Username").fill(`admin-${Date.now()}`);
+  await page.getByLabel("Passphrase").fill("admin-passphrase");
+  await page.locator("#role-admin").check();
+  await page.getByRole("button", { name: /Create local account/ }).click();
+  await page.waitForSelector("[data-role=admin]");
+  check("admin shell", await page.locator(".app-shell").getAttribute("data-role") === "admin");
+  await page.getByRole("button", { name: "Board" }).first().click();
+  await page.waitForSelector("#new-task");
+  check("admin can edit", await page.locator("#new-task").count() === 1);
 
   await mkdir("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/ledgerlane-features.png", fullPage: true });

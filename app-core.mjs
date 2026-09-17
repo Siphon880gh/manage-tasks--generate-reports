@@ -35,6 +35,24 @@ export function isViewer(user) {
   return Boolean(user && user.role === "viewer");
 }
 
+export function isAdmin(user) {
+  return Boolean(user && user.role === "admin");
+}
+
+export function accountRole(user) {
+  if (!user) return null;
+  if (user.role === "viewer") return "viewer";
+  if (user.role === "admin") return "admin";
+  return "editor";
+}
+
+export function roleCaption(user) {
+  const role = accountRole(user);
+  if (role === "viewer") return "View only";
+  if (role === "admin") return "Admin";
+  return "Editor";
+}
+
 export function canEdit(user) {
   return Boolean(user) && !isViewer(user);
 }

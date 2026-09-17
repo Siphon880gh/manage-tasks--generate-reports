@@ -1,7 +1,7 @@
 import {
-  COLUMN_TYPES, DEFAULT_COLUMNS, applyDropOrder, availableColumnTypes, canAddColumnType,
+  COLUMN_TYPES, DEFAULT_COLUMNS, accountRole, applyDropOrder, availableColumnTypes, canAddColumnType,
   canEdit as userCanEdit, columnTypeToStatus, confirmDeleteMessage, filterTasks, formatMoment, plainText,
-  reportRows, sortTasks, statusToColumnType, taskProgress, toCsv
+  reportRows, roleCaption, sortTasks, statusToColumnType, taskProgress, toCsv
 } from "./app-core.mjs";
 import {
   buildClickUpCsv, buildLedgerLaneBackup, buildNotionMarkdown, columnTypeForImport, importPreview, parseImport
@@ -183,7 +183,7 @@ async function refresh() {
 }
 
 function renderAuth(error = "") {
-  root.innerHTML = `<main class="auth-page"><section class="auth-art"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><h1>WORK,<br>ACCOUNTED<br>FOR.</h1><div><p class="statement">A local-first workspace for turning progress into proof — without sending your data anywhere.</p><p class="mono">PRIVATE BY DEFAULT / LOCAL BY DESIGN</p></div></section><section class="auth-card"><form id="auth-form"><div class="auth-tabs"><button type="button" data-auth="signup" class="${state.authMode === "signup" ? "active" : ""}">Create account</button><button type="button" data-auth="login" class="${state.authMode === "login" ? "active" : ""}">Sign in</button></div><p class="eyebrow">Local workspace</p><h2>${state.authMode === "signup" ? "Start your ledger." : "Welcome back."}</h2><p class="hint">Accounts live only in this browser on this computer.</p>${error ? `<p class="auth-error">${escapeHtml(error)}</p>` : ""}<div class="form" style="padding:24px 0">${state.authMode === "signup" ? `<div class="field"><label for="name">Display name</label><input id="name" name="name" required placeholder="e.g. Morgan Lee"></div>` : ""}<div class="field"><label for="username">Username</label><input id="username" name="username" required autocomplete="username" placeholder="morgan"></div><div class="field"><label for="password">Passphrase</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${state.authMode === "signup" ? "new-password" : "current-password"}" placeholder="At least 6 characters"></div>${state.authMode === "signup" ? `<label class="check-line role-line" for="viewer"><input id="viewer" name="viewer" type="checkbox"> <span>View only<small>See the Board and Reports. Cannot create, edit, move, or delete anything.</small></span></label>` : ""}<button class="button primary" type="submit">${state.authMode === "signup" ? "Create local account →" : "Enter workspace →"}</button></div></form></section></main>`;
+  root.innerHTML = `<main class="auth-page"><section class="auth-art"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><h1>WORK,<br>ACCOUNTED<br>FOR.</h1><div><p class="statement">A local-first workspace for turning progress into proof — without sending your data anywhere.</p><p class="mono">PRIVATE BY DEFAULT / LOCAL BY DESIGN</p></div></section><section class="auth-card"><form id="auth-form"><div class="auth-tabs"><button type="button" data-auth="signup" class="${state.authMode === "signup" ? "active" : ""}">Create account</button><button type="button" data-auth="login" class="${state.authMode === "login" ? "active" : ""}">Sign in</button></div><p class="eyebrow">Local workspace</p><h2>${state.authMode === "signup" ? "Start your ledger." : "Welcome back."}</h2><p class="hint">Accounts live only in this browser on this computer.</p>${error ? `<p class="auth-error">${escapeHtml(error)}</p>` : ""}<div class="form" style="padding:24px 0">${state.authMode === "signup" ? `<div class="field"><label for="name">Display name</label><input id="name" name="name" required placeholder="e.g. Morgan Lee"></div>` : ""}<div class="field"><label for="username">Username</label><input id="username" name="username" required autocomplete="username" placeholder="morgan"></div><div class="field"><label for="password">Passphrase</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${state.authMode === "signup" ? "new-password" : "current-password"}" placeholder="At least 6 characters"></div>${state.authMode === "signup" ? `<fieldset class="role-pick"><legend>Account type</legend><label class="mode-card" for="role-editor"><input id="role-editor" name="role" type="radio" value="editor" checked> <span>Editor<small>Create, move, and edit tasks. Default workspace role.</small></span></label><label class="mode-card" for="role-admin"><input id="role-admin" name="role" type="radio" value="admin"> <span>Admin<small>Full edit access, labeled Admin. Use for the Admin User test account.</small></span></label><label class="mode-card" for="role-viewer"><input id="role-viewer" name="role" type="radio" value="viewer"> <span>View only<small>See the Board and Reports. Cannot create, edit, move, or delete anything.</small></span></label></fieldset>` : ""}<button class="button primary" type="submit">${state.authMode === "signup" ? "Create local account →" : "Enter workspace →"}</button></div></form></section></main>`;
   document.querySelectorAll("[data-auth]").forEach((button) => button.onclick = () => { state.authMode = button.dataset.auth; renderAuth(); });
   document.querySelector("#auth-form").onsubmit = handleAuth;
 }
@@ -195,10 +195,14 @@ async function handleAuth(event) {
   const passwordHash = await hash(data.get("password"));
   if (state.authMode === "signup") {
     if (state.users.some((u) => u.username === username)) return renderAuth("That username already exists on this device.");
-    const role = data.get("viewer") ? "viewer" : "editor";
+    const requested = String(data.get("role") || "editor");
+    const role = requested === "admin" || requested === "viewer" ? requested : "editor";
     const user = { id: uuid(), name: data.get("name").trim(), username, passwordHash, role, createdAt: new Date().toISOString() };
     await put("users", user);
-    if (role !== "viewer") await seedTasks(user);
+    if (role !== "viewer") {
+      const existingTasks = await all("tasks");
+      if (!existingTasks.length) await seedTasks(user);
+    }
     localStorage.setItem("ledgerlane-session", user.id);
   } else {
     const user = state.users.find((u) => u.username === username && u.passwordHash === passwordHash);
@@ -242,7 +246,8 @@ async function seedTasks(user) {
 }
 
 function shell(content) {
-  return `<div class="app-shell ${canEdit() ? "" : "is-viewer"}" data-role="${canEdit() ? "editor" : "viewer"}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav><div class="account-area"><span class="account-name"><strong>${escapeHtml(state.user.name)}</strong><br><small class="mono">${canEdit() ? "Local account" : "View only"}</small></span><button class="avatar" id="account-button" title="Sign out">${initials(state.user.name)}</button></div></header>${content}<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">▦ BOARD</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">▤ REPORTS</button></nav></div>`;
+  const role = accountRole(state.user);
+  return `<div class="app-shell ${role === "viewer" ? "is-viewer" : ""}" data-role="${role}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav><div class="account-area"><span class="account-name"><strong>${escapeHtml(state.user.name)}</strong><br><small class="mono">${escapeHtml(roleCaption(state.user))}</small></span><button class="avatar" id="account-button" title="Sign out">${initials(state.user.name)}</button></div></header>${content}<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">▦ BOARD</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">▤ REPORTS</button></nav></div>`;
 }
 
 function render() {
@@ -253,6 +258,7 @@ function render() {
     if (await askConfirm({ title: "Sign out?", message: `Sign out ${state.user.name}? You can return with the same local passphrase.`, confirmLabel: "Sign out" })) {
       localStorage.removeItem("ledgerlane-session");
       state.user = null;
+      state.view = "board";
       state.suppressCardClick = false;
       render();
     }
