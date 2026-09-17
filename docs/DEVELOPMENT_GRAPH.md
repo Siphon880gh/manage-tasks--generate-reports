@@ -15,6 +15,8 @@ flowchart LR
   E -.-> E1[loops/05-release.md]
 ```
 
+Chrome drain (after the product loops) lives in [DRAIN_GRAPH.md](DRAIN_GRAPH.md).
+
 ## Epics and milestones
 
 | Epic | Milestone | Exit criterion |
