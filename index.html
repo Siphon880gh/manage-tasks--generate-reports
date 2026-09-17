@@ -13,6 +13,124 @@
 <body>
   <div id="app" aria-live="polite"></div>
   <div id="toast" class="toast" role="status"></div>
+  <div id="record-hud" class="record-bar" hidden role="status">
+    <div class="record-bar-inner">
+      <span class="rec-dot" aria-hidden="true"></span>
+      <span id="record-hud-label">Recording screen</span>
+      <span id="record-hud-time" class="record-time">0:00</span>
+      <div class="record-bar-actions">
+        <button type="button" class="button ghost" id="cancel-recording">Discard</button>
+        <button type="button" class="button acid" id="stop-recording">Stop &amp; save</button>
+      </div>
+    </div>
+  </div>
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <form method="dialog" id="confirm-form">
+      <h2 id="confirm-title">Confirm</h2>
+      <p id="confirm-message"></p>
+      <footer class="form-actions">
+        <button class="button" type="submit" value="cancel" id="confirm-cancel">Cancel</button>
+        <button class="button primary danger-fill" type="submit" value="confirm" id="confirm-ok">Delete</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="project-dialog">
+    <form id="project-form">
+      <header class="modal-head">
+        <h2>New project</h2>
+        <button class="icon-button" type="button" id="close-project" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <div class="field">
+          <label for="project-name">Project name</label>
+          <input id="project-name" name="name" required placeholder="e.g. Atlas rollout" maxlength="80">
+        </div>
+        <p class="hint">Starts with To do, In progress, and one Complete column. You can rename or add columns after.</p>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-project">Cancel</button>
+        <button class="button primary" type="submit">Create project</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="import-dialog" class="transfer-dialog">
+    <form id="import-form">
+      <header class="modal-head">
+        <h2>Import tasks</h2>
+        <button class="icon-button" type="button" id="close-import" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <div class="field">
+          <label for="import-file">File</label>
+          <input id="import-file" name="file" type="file" accept=".csv,.json,.tsv,.txt,text/csv,application/json">
+        </div>
+        <p class="hint">Accepts a ClickUp workspace export (Settings → Imports / Exports → Export Items) or a ClickUp spreadsheet import file. LedgerLane JSON backups also work.</p>
+        <p id="import-preview" class="import-preview">Choose a file to preview how many tasks will come in.</p>
+        <fieldset class="import-modes">
+          <legend>When tasks already exist</legend>
+          <label class="mode-card"><input type="radio" name="mode" value="append" checked> <span><strong>Append</strong><small>Keep current tasks and add the imported ones.</small></span></label>
+          <label class="mode-card"><input type="radio" name="mode" value="replace"> <span><strong>Replace</strong><small>Delete every current task, then import. Projects stay.</small></span></label>
+        </fieldset>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-import">Cancel</button>
+        <button class="button primary" type="submit" id="confirm-import" disabled>Import tasks</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="export-dialog" class="transfer-dialog">
+    <form id="export-form">
+      <header class="modal-head">
+        <h2>Export</h2>
+        <button class="icon-button" type="button" id="close-export" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <p class="hint">Pick a format. Notion is text you paste. ClickUp CSV uses official column names. LedgerLane JSON is a full backup.</p>
+        <div class="export-choices">
+          <button class="button acid" type="button" id="export-notion">Copy for Notion</button>
+          <button class="button" type="button" id="export-clickup">Download ClickUp CSV</button>
+          <button class="button" type="button" id="export-ledgerlane">Download LedgerLane backup</button>
+        </div>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-export">Close</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="notion-dialog" class="transfer-dialog notion-dialog">
+    <form id="notion-form">
+      <header class="modal-head">
+        <h2>Copy for Notion</h2>
+        <button class="icon-button" type="button" id="close-notion" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <p class="hint">This is Markdown. Paste it into any Notion page and it becomes headings, to-do checkboxes, and notes. Board filters apply, so you can copy one project or the whole workspace.</p>
+        <label class="field" for="notion-text"><span>Text to paste</span><textarea id="notion-text" readonly rows="16" spellcheck="false"></textarea></label>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-notion">Close</button>
+        <button class="button primary" type="button" id="copy-notion">Copy text</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="record-target-dialog">
+    <form id="record-target-form">
+      <header class="modal-head">
+        <h2>Attach recording</h2>
+        <button class="icon-button" type="button" id="close-record-target" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <div class="field">
+          <label for="record-target-task">Task</label>
+          <select id="record-target-task" name="taskId" required></select>
+        </div>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-record-target">Discard</button>
+        <button class="button primary" type="submit">Attach to task</button>
+      </footer>
+    </form>
+  </dialog>
   <script type="module" src="app.mjs"></script>
 </body>
 </html>
