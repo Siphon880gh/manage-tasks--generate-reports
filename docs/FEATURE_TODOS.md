@@ -46,7 +46,7 @@ Implementation plan for the workspace upgrades. Each item lists the intended UX,
 
 ### 5. ClickUp-style task modal with progressive disclosure
 
-- Wide task dialog: large title, compact status/project/priority/owner row, then a large rich-text description.
+- Wide task dialog: large title, then description. Status / project / priority / owner live in a closed **Task details** block.
 - Description supports bold/italic/underline/lists, paste of HTML, and paste/drop of images.
 - Files can be attached (picker or drop). Images and recordings preview in-place.
 - Advanced fields (timestamps, settlement amount) live in a **collapsed** `<details>` block.
@@ -78,11 +78,12 @@ Implementation plan for the workspace upgrades. Each item lists the intended UX,
 
 ### 8. Rename and add custom columns per project
 
-- Filtering to one project shows that project’s columns and an **Add column** panel.
-- Any column title is editable.
+- Filtering to one project and turning on **Edit board** shows that project’s columns, pencils, and **Add column**.
+- ✏ opens a modal: name, type, and delete (last column cannot be deleted).
 - New columns choose a type: To do, In progress, or Complete.
 - **Complete is unique** — a project may have only one Complete column. Extra columns are To do or In progress.
-- All-projects view aggregates by type and does not allow structural edits.
+- All-projects view aggregates by type and does not allow structural edits until a project is chosen.
+- **New project** lives in Edit board mode, not beside **New task**.
 
 **Verify:** add a To do column on a project; Complete is omitted from the type list when one already exists; rename persists after reload of state.
 
@@ -144,5 +145,6 @@ npm run verify
 - [x] Import append/replace + ClickUp CSV detect/preview; export ClickUp CSV and LedgerLane JSON
 - [x] View-only accounts see Board and Reports and cannot edit
 - [x] Copy for Notion (Markdown to-dos; viewers included)
+- [x] Drain: compact work titles, closed extras, account menu, waiting names admins
 
-Playwright feature checks and `artifacts/ledgerlane-features.png` are refreshed by `npm run verify`.
+Playwright feature checks and `artifacts/ledgerlane-features.png` are refreshed by `npm run verify`. Chrome drain loops: [DRAIN_GRAPH.md](DRAIN_GRAPH.md).

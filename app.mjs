@@ -1,18 +1,22 @@
 import {
-  COLUMN_TYPES, DEFAULT_COLUMNS, accountRole, applyDropOrder, availableColumnTypes, canAddColumnType,
-  canEdit as userCanEdit, columnTypeToStatus, confirmDeleteMessage, filterTasks, formatMoment, plainText,
-  reportRows, roleCaption, sortTasks, statusToColumnType, taskProgress, toCsv
+  BOARD_ROLES, COLUMN_TYPES, DEFAULT_COLUMNS, applyDropOrder, availableColumnTypes, availableColumnTypesForEdit, boardRole,
+  canAccessBoard, canAddColumnType, canAssignRole, canDeleteColumn, canEditBoard, canManagePeople, canRemoveMember,
+  columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage, destinationAfterColumnDelete,
+  filterTasks, formatMoment, invitableUsers, memberFor,
+  naturalJoin, normalizeBoardRole, plainText, reportRows, roleCaption, seedMemberships, sortTasks, statusToColumnType,
+  taskProgress, toCsv
 } from "./app-core.mjs";
 import {
   buildClickUpCsv, buildLedgerLaneBackup, buildNotionMarkdown, columnTypeForImport, importPreview, parseImport
 } from "./import-export.mjs";
 
 const DB_NAME = "ledgerlane-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "P", "BR", "UL", "OL", "LI", "A", "IMG", "DIV", "SPAN", "H3"]);
 const state = {
   user: null,
   users: [],
+  members: [],
   tasks: [],
   projects: [],
   columns: [],
@@ -25,7 +29,9 @@ const state = {
   recording: { active: false, recorder: null, stream: null, chunks: [], taskId: null, startedAt: 0, timer: null },
   modalAttachments: [],
   suppressCardClick: false,
-  pendingImport: null
+  pendingImport: null,
+  boardStructure: false,
+  structureRestoreAll: false
 };
 const root = document.querySelector("#app");
 
@@ -38,6 +44,7 @@ const dbPromise = new Promise((resolve, reject) => {
     if (!db.objectStoreNames.contains("projects")) db.createObjectStore("projects", { keyPath: "id" });
     if (!db.objectStoreNames.contains("columns")) db.createObjectStore("columns", { keyPath: "id" }).createIndex("projectId", "projectId");
     if (!db.objectStoreNames.contains("attachments")) db.createObjectStore("attachments", { keyPath: "id" }).createIndex("taskId", "taskId");
+    if (!db.objectStoreNames.contains("members")) db.createObjectStore("members", { keyPath: "id" }).createIndex("userId", "userId", { unique: true });
   };
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error);
@@ -110,13 +117,35 @@ function askConfirm({ title, message, confirmLabel = "Delete permanently" }) {
 }
 
 function canEdit() {
-  return userCanEdit(state.user);
+  return canEditBoard(state.user, state.members);
 }
 
 function guardEdit() {
   if (canEdit()) return true;
-  toast("This account is view only");
+  toast("This account is view only on this board");
   return false;
+}
+
+function guardManage() {
+  if (canManagePeople(state.user, state.members)) return true;
+  toast("Only a board admin can manage people");
+  return false;
+}
+
+function currentBoardRole() {
+  return boardRole(state.user, state.members);
+}
+
+function boardPeople() {
+  return state.members.map((member) => {
+    const user = state.users.find((item) => item.id === member.userId);
+    return user ? { member, user, name: user.name } : null;
+  }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function memberUsers() {
+  const ids = new Set(state.members.map((member) => member.userId));
+  return state.users.filter((user) => ids.has(user.id));
 }
 
 function columnsFor(projectId) {
@@ -165,11 +194,19 @@ async function migrateWorkspace() {
   state.columns = await all("columns");
 }
 
+async function ensureBoardMembers() {
+  if (state.members.length || !state.users.length) return;
+  for (const member of seedMemberships(state.users)) await put("members", member);
+  state.members = await all("members");
+}
+
 async function refresh() {
   state.users = await all("users");
+  state.members = await all("members");
   state.tasks = await all("tasks");
   state.projects = await all("projects");
   state.columns = await all("columns");
+  await ensureBoardMembers();
   const id = localStorage.getItem("ledgerlane-session");
   state.user = state.users.find((u) => u.id === id) || null;
   await migrateWorkspace();
@@ -179,11 +216,18 @@ async function refresh() {
     const known = new Set(state.projects.map((project) => project.id));
     state.report.projectIds = state.report.projectIds.filter((projectId) => known.has(projectId));
   }
+  const peopleOpen = document.querySelector("#people-dialog")?.open;
   render();
+  if (peopleOpen) fillPeopleDialog();
 }
 
 function renderAuth(error = "") {
-  root.innerHTML = `<main class="auth-page"><section class="auth-art"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><h1>WORK,<br>ACCOUNTED<br>FOR.</h1><div><p class="statement">A local-first workspace for turning progress into proof — without sending your data anywhere.</p><p class="mono">PRIVATE BY DEFAULT / LOCAL BY DESIGN</p></div></section><section class="auth-card"><form id="auth-form"><div class="auth-tabs"><button type="button" data-auth="signup" class="${state.authMode === "signup" ? "active" : ""}">Create account</button><button type="button" data-auth="login" class="${state.authMode === "login" ? "active" : ""}">Sign in</button></div><p class="eyebrow">Local workspace</p><h2>${state.authMode === "signup" ? "Start your ledger." : "Welcome back."}</h2><p class="hint">Accounts live only in this browser on this computer.</p>${error ? `<p class="auth-error">${escapeHtml(error)}</p>` : ""}<div class="form" style="padding:24px 0">${state.authMode === "signup" ? `<div class="field"><label for="name">Display name</label><input id="name" name="name" required placeholder="e.g. Morgan Lee"></div>` : ""}<div class="field"><label for="username">Username</label><input id="username" name="username" required autocomplete="username" placeholder="morgan"></div><div class="field"><label for="password">Passphrase</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${state.authMode === "signup" ? "new-password" : "current-password"}" placeholder="At least 6 characters"></div>${state.authMode === "signup" ? `<fieldset class="role-pick"><legend>Account type</legend><label class="mode-card" for="role-editor"><input id="role-editor" name="role" type="radio" value="editor" checked> <span>Editor<small>Create, move, and edit tasks. Default workspace role.</small></span></label><label class="mode-card" for="role-admin"><input id="role-admin" name="role" type="radio" value="admin"> <span>Admin<small>Full edit access, labeled Admin. Use for the Admin User test account.</small></span></label><label class="mode-card" for="role-viewer"><input id="role-viewer" name="role" type="radio" value="viewer"> <span>View only<small>See the Board and Reports. Cannot create, edit, move, or delete anything.</small></span></label></fieldset>` : ""}<button class="button primary" type="submit">${state.authMode === "signup" ? "Create local account →" : "Enter workspace →"}</button></div></form></section></main>`;
+  const signup = state.authMode === "signup";
+  const hint = signup
+    ? "Accounts stay on this computer. The first account becomes the board admin. Later people wait for an invite."
+    : "Use the username and passphrase saved in this browser.";
+  const rolePick = signup ? `<details class="advanced-options" id="account-type-options"><summary>Account type</summary><fieldset class="role-pick"><legend class="visually-hidden">Account type</legend><label class="mode-card" for="role-editor"><input id="role-editor" name="role" type="radio" value="editor" checked> <span>Editor<small>Create, move, and edit tasks.</small></span></label><label class="mode-card" for="role-admin"><input id="role-admin" name="role" type="radio" value="admin"> <span>Admin<small>Labeled Admin. Board access still needs an invite after the first account.</small></span></label><label class="mode-card" for="role-viewer"><input id="role-viewer" name="role" type="radio" value="viewer"> <span>View only<small>See the board after an invite. Cannot edit.</small></span></label></fieldset><p class="hint">This is a label. Board access is invite-only after the first account.</p></details>` : "";
+  root.innerHTML = `<main class="auth-page"><section class="auth-art"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><h1>WORK,<br>ACCOUNTED<br>FOR.</h1><div><p class="statement">A local-first workspace for turning progress into proof — without sending your data anywhere.</p><p class="mono">PRIVATE BY DEFAULT / LOCAL BY DESIGN</p></div></section><section class="auth-card"><form id="auth-form"><div class="auth-tabs"><button type="button" data-auth="signup" class="${signup ? "active" : ""}">Create account</button><button type="button" data-auth="login" class="${signup ? "" : "active"}">Sign in</button></div><p class="eyebrow">Local workspace</p><h2>${signup ? "Start your ledger." : "Welcome back."}</h2><p class="hint">${hint}</p>${error ? `<p class="auth-error">${escapeHtml(error)}</p>` : ""}<div class="form" style="padding:24px 0">${signup ? `<div class="field"><label for="name">Display name</label><input id="name" name="name" required placeholder="e.g. Morgan Lee"></div>` : ""}<div class="field"><label for="username">Username</label><input id="username" name="username" required autocomplete="username" placeholder="morgan"></div><div class="field"><label for="password">Passphrase</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${signup ? "new-password" : "current-password"}" placeholder="At least 6 characters"></div>${signup ? `<p class="hint">At least 6 characters, stored only here.</p>` : ""}${rolePick}<button class="button primary" type="submit">${signup ? "Create local account →" : "Enter workspace →"}</button></div></form></section></main>`;
   document.querySelectorAll("[data-auth]").forEach((button) => button.onclick = () => { state.authMode = button.dataset.auth; renderAuth(); });
   document.querySelector("#auth-form").onsubmit = handleAuth;
 }
@@ -245,26 +289,107 @@ async function seedTasks(user) {
   }
 }
 
-function shell(content) {
-  const role = accountRole(state.user);
-  return `<div class="app-shell ${role === "viewer" ? "is-viewer" : ""}" data-role="${role}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div><nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav><div class="account-area"><span class="account-name"><strong>${escapeHtml(state.user.name)}</strong><br><small class="mono">${escapeHtml(roleCaption(state.user))}</small></span><button class="avatar" id="account-button" title="Sign out">${initials(state.user.name)}</button></div></header>${content}<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">▦ BOARD</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">▤ REPORTS</button></nav></div>`;
+function peopleTrigger() {
+  const people = boardPeople();
+  const shown = people.slice(0, 3);
+  const extra = people.length - shown.length;
+  return `<button type="button" class="people-trigger" id="open-people" aria-label="People on this board">
+    <span class="facepile">${shown.map((person, index) => `<span class="face face-${(index % 3) + 1}" title="${escapeHtml(person.name)}">${escapeHtml(initials(person.name))}</span>`).join("")}</span>
+    <span class="people-label">People${extra > 0 ? ` +${extra}` : ""}</span>
+  </button>`;
+}
+
+function boardAdminNames() {
+  return boardPeople().filter((person) => person.member.role === "admin").map((person) => person.name);
+}
+
+function waitingView() {
+  const who = naturalJoin(boardAdminNames());
+  return `<main class="main waiting-page" id="waiting-access">
+    <header class="page-head"><div><p class="eyebrow">Access</p><h1>Not on this board yet.</h1></div></header>
+    <p class="waiting-copy">You’re signed in. Ask <strong class="waiting-admins">${escapeHtml(who)}</strong> to invite you.</p>
+    <button class="button" type="button" id="waiting-sign-out">Sign out</button>
+  </main>`;
+}
+
+function accountChrome(access) {
+  const role = access ? (currentBoardRole() || "editor") : "none";
+  const caption = access ? roleCaption({ role }) : "No access";
+  return `${access ? peopleTrigger() : ""}
+    <span class="account-name"><strong>${escapeHtml(state.user.name)}</strong><br><small class="stamp">${escapeHtml(caption)}</small></span>
+    <div class="menu" data-menu="account-menu">
+      <button type="button" class="avatar" id="account-button" data-menu-toggle aria-expanded="false" aria-haspopup="menu" aria-label="Account menu">${escapeHtml(initials(state.user.name))}</button>
+      <div class="menu-panel account-menu-panel" id="account-menu-panel" role="menu" hidden>
+        <p class="account-menu-id"><strong>${escapeHtml(state.user.name)}</strong><small>${escapeHtml(caption)}</small></p>
+        <button type="button" class="menu-item" role="menuitem" id="sign-out-button"><strong>Sign out</strong><small>Return with the same local passphrase.</small></button>
+      </div>
+    </div>`;
+}
+
+function shell(content, { access = true } = {}) {
+  const role = access ? (currentBoardRole() || "editor") : "none";
+  const nav = access ? `<nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav>` : "";
+  const mobile = access ? `<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav>` : "";
+  const structure = access && canEdit() ? `<button type="button" class="board-structure-toggle" id="edit-board" aria-pressed="${state.boardStructure ? "true" : "false"}" aria-label="${state.boardStructure ? "Stop editing board" : "Edit board"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.boardStructure ? "Editing board" : "Edit board"}</span></button>` : "";
+  return `<div class="app-shell ${role === "viewer" ? "is-viewer" : ""} ${state.boardStructure ? "is-structuring" : ""}" data-role="${role}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div>${nav}<div class="account-area">${structure}${accountChrome(access)}</div></header>${content}${mobile}</div>`;
+}
+
+async function signOutUser() {
+  closeActionMenus();
+  if (!state.user) return;
+  if (await askConfirm({ title: "Sign out?", message: `Sign out ${state.user.name}? You can return with the same local passphrase.`, confirmLabel: "Sign out" })) {
+    localStorage.removeItem("ledgerlane-session");
+    state.user = null;
+    state.view = "board";
+    state.boardStructure = false;
+    state.structureRestoreAll = false;
+    state.suppressCardClick = false;
+    render();
+  }
+}
+
+function firstProjectId() {
+  return state.projects.slice().sort((a, b) => a.name.localeCompare(b.name))[0]?.id || "all";
+}
+
+function setBoardStructure(on) {
+  if (on) {
+    if (!state.boardStructure && (state.filters.project === "all" || !state.filters.project)) {
+      state.structureRestoreAll = true;
+      const id = firstProjectId();
+      if (id !== "all") state.filters.project = id;
+    }
+    state.boardStructure = true;
+  } else {
+    state.boardStructure = false;
+    if (state.structureRestoreAll) {
+      state.filters.project = "all";
+      state.structureRestoreAll = false;
+    }
+  }
+  render();
+}
+
+function bindAccount() {
+  const leave = (event) => {
+    event.preventDefault();
+    signOutUser();
+  };
+  document.querySelector("#sign-out-button")?.addEventListener("click", leave);
+  document.querySelector("#waiting-sign-out")?.addEventListener("click", leave);
 }
 
 function render() {
   if (!state.user) return renderAuth();
-  root.innerHTML = shell(state.view === "board" ? boardView() : reportsView());
-  document.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.view; render(); });
-  document.querySelector("#account-button").onclick = async () => {
-    if (await askConfirm({ title: "Sign out?", message: `Sign out ${state.user.name}? You can return with the same local passphrase.`, confirmLabel: "Sign out" })) {
-      localStorage.removeItem("ledgerlane-session");
-      state.user = null;
-      state.view = "board";
-      state.suppressCardClick = false;
-      render();
-    }
-  };
-  state.view === "board" ? bindBoard() : bindReports();
+  const access = canAccessBoard(state.user, state.members);
+  root.innerHTML = shell(access ? (state.view === "board" ? boardView() : reportsView()) : waitingView(), { access });
+  bindAccount();
   bindActionMenus();
+  document.querySelector("#edit-board")?.addEventListener("click", () => setBoardStructure(!state.boardStructure));
+  if (!access) return;
+  document.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.view; render(); });
+  document.querySelector("#open-people").onclick = () => openPeopleDialog();
+  state.view === "board" ? bindBoard() : bindReports();
 }
 
 function visibleColumns() {
@@ -290,17 +415,13 @@ function boardView() {
   const columns = visibleColumns();
   const selectedCount = [...state.selection].filter((id) => visible.some((task) => task.id === id)).length;
   const scopedProject = state.projects.find((project) => project.id === state.filters.project);
-  const addTypes = scopedProject ? availableColumnTypes(columnsFor(scopedProject.id)) : [];
   const edit = canEdit();
+  const structuring = edit && state.boardStructure;
   return `<main class="main">
-    <header class="page-head">
-      <div><p class="eyebrow">Workspace / Delivery board</p><h1>Move the work.<br><em>Keep the proof.</em></h1></div>
+    <header class="page-head page-head-work">
+      <div><p class="eyebrow">Board</p><h1 class="page-title">Delivery</h1></div>
       <div class="page-actions">${edit ? `
-        <div class="action-cluster" aria-label="Create">
-          <button class="button" id="new-project" type="button">New project</button>
-          <button class="button acid" id="new-task" type="button">New task</button>
-        </div>
-        <div class="action-divider" aria-hidden="true"></div>
+        <button class="button acid" id="new-task" type="button">New task</button>
         ${actionMenu("board-menu", "More actions", [
           menuItem("import-tasks", "Import tasks", "Add work from ClickUp or a LedgerLane file"),
           menuItem("export-tasks", "Export…", "Copy for Notion, ClickUp CSV, or a LedgerLane backup"),
@@ -313,9 +434,19 @@ function boardView() {
         <button class="button" id="export-tasks" type="button">Copy for Notion</button>`}
       </div>
     </header>
+    ${structuring ? `<section class="structure-bar" id="structure-bar" aria-label="Board structure">
+      <div class="structure-copy">
+        <p><strong>Editing board columns.</strong> Click a column name or ✏ to rename, change type, or delete.</p>
+        ${state.projects.length ? `<div class="field structure-project-field"><label for="structure-project">Project</label><select id="structure-project">${state.projects.map((project) => `<option value="${project.id}" ${state.filters.project === project.id ? "selected" : ""}>${escapeHtml(project.name)}</option>`).join("")}</select></div>` : `<p class="hint">Create a project first — columns belong to a project.</p>`}
+      </div>
+      <div class="structure-actions">
+        <button class="button" id="new-project" type="button">New project</button>
+        <button class="button" id="done-structure" type="button">Done</button>
+      </div>
+    </section>` : ""}
     <section class="toolbar" aria-label="Board filters">
       <input class="search" id="search" value="${escapeHtml(state.filters.query)}" placeholder="⌕ Search tasks or projects…">
-      <select class="select" id="owner-filter"><option value="all">All owners</option>${state.users.map((u) => `<option value="${u.id}" ${state.filters.owner === u.id ? "selected" : ""}>${escapeHtml(u.name)}</option>`).join("")}</select>
+      <select class="select" id="owner-filter"><option value="all">All owners</option>${memberUsers().map((u) => `<option value="${u.id}" ${state.filters.owner === u.id ? "selected" : ""}>${escapeHtml(u.name)}</option>`).join("")}</select>
       <select class="select" id="project-filter"><option value="all">All projects</option>${state.projects.map((p) => `<option value="${p.id}" ${state.filters.project === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select>
       ${edit ? `<label class="toolbar-select check-line"><input type="checkbox" id="select-all" ${visible.length && selectedCount === visible.length ? "checked" : ""}> Select</label>` : ""}
     </section>
@@ -324,35 +455,33 @@ function boardView() {
       <button class="button" id="delete-selected" type="button" ${selectedCount ? "" : "disabled"}>Delete selected</button>
       <button class="button ghost" id="clear-selection" type="button">Clear</button>
     </section>` : ""}
-    <section class="kanban">${columns.map((column) => columnMarkup(column, visible)).join("")}${edit && scopedProject ? addColumnMarkup(addTypes) : ""}</section>
-    ${scopedProject && edit ? "" : scopedProject ? "" : `<p class="hint board-hint">${edit ? "Select one project to rename columns or add custom ones. Complete stays a single column type." : "You can browse every project. Nothing here can be changed from this account."}</p>`}
+    <section class="kanban">${columns.map((column) => columnMarkup(column, visible)).join("")}${structuring && scopedProject ? addColumnMarkup() : ""}</section>
+    ${edit ? `<button class="button acid fab-new-task" id="fab-new-task" type="button">New task</button>` : ""}
   </main>${taskDialog()}`;
 }
 
 function columnMarkup(column, visible) {
   const tasks = sortTasks(visible.filter((task) => column.virtual ? task.status === columnTypeToStatus(column.type) : task.columnId === column.id));
   const typeLabel = COLUMN_TYPES.find((item) => item.id === column.type)?.label || column.type;
-  const title = column.virtual || !canEdit()
-    ? `<h2>${escapeHtml(column.name)}</h2>`
-    : `<label class="column-title-wrap"><span class="visually-hidden">Rename column</span><input class="column-title" data-rename="${column.id}" value="${escapeHtml(column.name)}" aria-label="Column name"></label>`;
-  return `<div class="column" data-drop="${column.id}" data-column-type="${column.type}">
+  const structuring = canEdit() && state.boardStructure && !column.virtual;
+  const pencil = structuring
+    ? `<button type="button" class="column-edit" data-edit-column="${column.id}" aria-label="Edit column ${escapeHtml(column.name)}">✏</button>`
+    : "";
+  const title = structuring
+    ? `<h2><button type="button" class="column-title-btn" data-edit-column="${column.id}">${escapeHtml(column.name)}</button></h2>`
+    : `<h2>${escapeHtml(column.name)}</h2>`;
+  return `<div class="column ${structuring ? "is-structuring" : ""}" data-drop="${column.id}" data-column-type="${column.type}">
     <header class="column-head">
       ${title}
-      <span class="column-meta"><span class="count">${tasks.length}</span><span class="column-type">${escapeHtml(typeLabel)}</span></span>
+      <span class="column-meta">${pencil}<span class="count">${tasks.length}</span><span class="column-type">${escapeHtml(typeLabel)}</span></span>
     </header>
     <div class="card-list">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">${canEdit() ? "Drop work here" : "No work here"}</div>`}</div>
   </div>`;
 }
 
-function addColumnMarkup(types) {
+function addColumnMarkup() {
   return `<div class="add-column" id="add-column-panel">
     <button class="button" id="add-column-toggle" type="button">＋ Add column</button>
-    <form id="add-column-form" hidden>
-      <label class="field"><span>Column name</span><input name="name" required placeholder="e.g. Review" maxlength="40"></label>
-      <label class="field"><span>Column type</span><select name="type">${types.map((type) => `<option value="${type.id}">${escapeHtml(type.label)}${type.unique ? " (only one)" : ""}</option>`).join("")}</select></label>
-      ${types.length ? "" : `<p class="hint">Only the Complete type is unique — this project already has one.</p>`}
-      <button class="button primary" type="submit" ${types.length ? "" : "disabled"}>Add column</button>
-    </form>
   </div>`;
 }
 
@@ -381,12 +510,7 @@ function taskDialog() {
     <form id="task-form">
       <input type="hidden" name="id">
       <header class="task-dialog-head">
-        <div class="task-chip-row">
-          <label class="chip-field"><span>Status</span><select name="columnId" ${lock}></select></label>
-          <label class="chip-field"><span>Project</span><span class="chip-combo"><select name="projectId" ${lock}>${projectOptions}</select>${locked ? "" : `<button class="chip-add" type="button" id="task-new-project" title="New project" aria-label="New project">＋</button>`}</span></label>
-          <label class="chip-field"><span>Priority</span><select name="priority" ${lock}><option>low</option><option selected>medium</option><option>high</option></select></label>
-          <label class="chip-field"><span>Owner</span><select name="ownerId" ${lock}>${state.users.map((u) => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join("")}</select></label>
-        </div>
+        <p class="eyebrow">Task</p>
         <button class="icon-button" type="button" id="close-dialog" aria-label="Close">×</button>
       </header>
       <div class="task-dialog-body">
@@ -401,6 +525,15 @@ function taskDialog() {
           </div>`}
           <div class="rtf-editor" id="task-description" contenteditable="${locked ? "false" : "true"}" role="textbox" aria-label="Description" data-placeholder="Write the brief, paste screenshots, or drop evidence…"></div>
         </div>
+        <details class="advanced-options" id="task-details">
+          <summary>Task details</summary>
+          <div class="task-chip-row">
+            <label class="chip-field"><span>Status</span><select name="columnId" ${lock}></select></label>
+            <label class="chip-field"><span>Project</span><span class="chip-combo"><select name="projectId" ${lock}>${projectOptions}</select>${locked ? "" : `<button class="chip-add" type="button" id="task-new-project" title="New project" aria-label="New project">＋</button>`}</span></label>
+            <label class="chip-field"><span>Priority</span><select name="priority" ${lock}><option>low</option><option selected>medium</option><option>high</option></select></label>
+            <label class="chip-field"><span>Owner</span><select name="ownerId" ${lock}>${memberUsers().map((u) => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join("")}</select></label>
+          </div>
+        </details>
         <section class="attach-panel" id="attach-panel">
           <header class="attach-head">
             <h3>Attachments</h3>
@@ -436,7 +569,19 @@ function bindBoard() {
   const dialog = document.querySelector("#task-dialog");
   document.querySelector("#search").oninput = (event) => { state.filters.query = event.target.value; render(); document.querySelector("#search").focus(); };
   document.querySelector("#owner-filter").onchange = (event) => { state.filters.owner = event.target.value; render(); };
-  document.querySelector("#project-filter").onchange = (event) => { state.filters.project = event.target.value; render(); };
+  document.querySelector("#project-filter").onchange = (event) => {
+    state.filters.project = event.target.value;
+    if (state.filters.project === "all" && state.boardStructure) {
+      state.boardStructure = false;
+      state.structureRestoreAll = false;
+    }
+    render();
+  };
+  document.querySelector("#structure-project")?.addEventListener("change", (event) => {
+    state.filters.project = event.target.value;
+    state.structureRestoreAll = false;
+    render();
+  });
   document.querySelector("#close-dialog").onclick = document.querySelector("#cancel-task").onclick = () => closeTaskDialog();
   document.querySelectorAll(".task-card").forEach((card) => {
     card.onclick = () => { if (!state.suppressCardClick) openTask(card.dataset.id); };
@@ -447,8 +592,9 @@ function bindBoard() {
     bindTaskEditor(dialog, true);
     return;
   }
-  document.querySelector("#new-task").onclick = () => openTask();
-  document.querySelector("#new-project").onclick = () => openProjectPrompt({ switchFilter: true });
+  document.querySelectorAll("#new-task, #fab-new-task").forEach((button) => { button.onclick = () => openTask(); });
+  document.querySelector("#new-project")?.addEventListener("click", () => openProjectPrompt({ switchFilter: true }));
+  document.querySelector("#done-structure")?.addEventListener("click", () => setBoardStructure(false));
   document.querySelector("#import-tasks").onclick = () => openImportDialog();
   document.querySelector("#export-tasks").onclick = () => openExportDialog();
   document.querySelector("#record-board").onclick = () => startRecording(null);
@@ -617,34 +763,108 @@ async function moveTask(taskId, dropId, insertIndex) {
 }
 
 function bindColumnEdits() {
-  document.querySelectorAll("[data-rename]").forEach((input) => {
-    input.onclick = (event) => event.stopPropagation();
-    input.onchange = async () => {
-      if (!guardEdit()) return;
-      const column = state.columns.find((item) => item.id === input.dataset.rename);
-      const name = input.value.trim();
-      if (!column || !name || name === column.name) return;
-      column.name = name;
-      await put("columns", column);
-      toast("Column renamed");
+  document.querySelectorAll("[data-edit-column]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      openColumnDialog({ columnId: button.dataset.editColumn });
     };
   });
   const toggle = document.querySelector("#add-column-toggle");
-  const form = document.querySelector("#add-column-form");
-  if (!toggle || !form) return;
-  toggle.onclick = () => { form.hidden = !form.hidden; if (!form.hidden) form.elements.name.focus(); };
+  if (toggle) toggle.onclick = () => openColumnDialog();
+}
+
+function fillColumnTypeSelect(select, types, current) {
+  select.innerHTML = types.map((type) => `<option value="${type.id}">${escapeHtml(type.label)}${type.unique ? " (only one)" : ""}</option>`).join("");
+  if (current && types.some((type) => type.id === current)) select.value = current;
+  else if (types.some((type) => type.id === "todo")) select.value = "todo";
+  else if (types[0]) select.value = types[0].id;
+}
+
+function columnTypeHint(types) {
+  return types.some((type) => type.id === "complete")
+    ? "To do and In progress can repeat. Complete can appear only once on a project."
+    : "Complete is already on this project, so new columns are To do or In progress.";
+}
+
+function openColumnDialog({ columnId } = {}) {
+  if (!guardEdit()) return;
+  const editing = columnId ? state.columns.find((item) => item.id === columnId) : null;
+  const projectId = editing?.projectId || state.filters.project;
+  if (!projectId || projectId === "all") {
+    toast("Choose a project to change columns");
+    return;
+  }
+  const existing = columnsFor(projectId);
+  const types = editing ? availableColumnTypesForEdit(existing, editing) : availableColumnTypes(existing);
+  const dialog = document.querySelector("#column-dialog");
+  const form = document.querySelector("#column-form");
+  const select = document.querySelector("#column-type");
+  const details = document.querySelector("#column-type-options");
+  const hint = document.querySelector("#column-type-hint");
+  const title = document.querySelector("#column-dialog-title");
+  const submit = document.querySelector("#save-column");
+  const removeBtn = document.querySelector("#delete-column");
+  form.reset();
+  title.textContent = editing ? "Edit column" : "Add column";
+  submit.textContent = editing ? "Save column" : "Add column";
+  form.elements.name.value = editing?.name || "";
+  details.open = Boolean(editing);
+  fillColumnTypeSelect(select, types, editing?.type);
+  hint.textContent = columnTypeHint(types);
+  const allowDelete = Boolean(editing && canDeleteColumn(existing));
+  removeBtn.hidden = !editing;
+  removeBtn.disabled = editing && !allowDelete;
+  document.querySelector("#close-column").onclick = document.querySelector("#cancel-column").onclick = () => dialog.close();
+  removeBtn.onclick = async () => {
+    if (!editing) return;
+    dialog.close();
+    await deleteColumn(editing);
+  };
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (!guardEdit()) return;
-    const projectId = state.filters.project;
-    const existing = columnsFor(projectId);
-    const type = form.elements.type.value;
     const name = form.elements.name.value.trim();
-    if (!name || !canAddColumnType(existing, type)) return;
-    await put("columns", { id: uuid(), projectId, name, type, order: existing.length });
-    toast("Column added");
+    const type = select.value || editing?.type || "todo";
+    if (!name) return;
+    if (editing) {
+      if (type !== editing.type && !canAddColumnType(existing.filter((item) => item.id !== editing.id), type)) return;
+      editing.name = name;
+      editing.type = type;
+      await put("columns", editing);
+      const inColumn = state.tasks.filter((task) => task.columnId === editing.id);
+      await Promise.all(inColumn.map((task) => put("tasks", applyColumn(task, editing))));
+      toast("Column saved");
+    } else {
+      if (!canAddColumnType(existing, type)) return;
+      await put("columns", { id: uuid(), projectId, name, type, order: existing.length });
+      toast("Column added");
+    }
+    dialog.close();
     await refresh();
   };
+  dialog.showModal();
+  form.elements.name.focus();
+}
+
+async function deleteColumn(column) {
+  if (!guardEdit()) return;
+  const siblings = columnsFor(column.projectId);
+  if (!canDeleteColumn(siblings)) {
+    toast("A project needs at least one column");
+    return;
+  }
+  const dest = destinationAfterColumnDelete(siblings, column.id);
+  const moved = state.tasks.filter((task) => task.columnId === column.id);
+  const ok = await askConfirm({
+    title: "Delete column?",
+    message: confirmDeleteColumnMessage(column.name, moved.length, dest?.name || ""),
+    confirmLabel: "Delete column"
+  });
+  if (!ok || !dest) return;
+  await Promise.all(moved.map((task) => put("tasks", applyColumn(task, dest))));
+  await remove("columns", column.id);
+  toast("Column deleted");
+  await refresh();
 }
 
 async function openProjectPrompt({ switchFilter = false, fromTask = false } = {}) {
@@ -676,7 +896,10 @@ async function openProjectPrompt({ switchFilter = false, fromTask = false } = {}
       }
       return;
     }
-    if (switchFilter) state.filters.project = project.id;
+    if (switchFilter) {
+      state.filters.project = project.id;
+      state.structureRestoreAll = false;
+    }
     await refresh();
   };
   dialog.showModal();
@@ -915,18 +1138,24 @@ function reportsView() {
   const rows = reportRows(state.tasks, state.report.type, { projectIds: selected });
   const total = rows.reduce((sum, task) => sum + Number(task.rate || 0), 0);
   const projects = new Set(rows.map((task) => task.project)).size;
+  const refineOpen = typeof matchMedia === "function" && matchMedia("(min-width: 801px)").matches;
   return `<main class="main">
-    <header class="page-head"><div><p class="eyebrow">Workspace / Reports</p><h1>Turn progress<br>into <em>proof.</em></h1></div></header>
+    <header class="page-head page-head-work"><div><p class="eyebrow">Reports</p><h1 class="page-title">Proof</h1></div></header>
     <section class="report-layout">
       <aside class="report-controls">
         <h3>Report lens</h3>
         <div class="report-types">${Object.entries(labels).map(([id, [label]]) => `<button class="report-type ${state.report.type === id ? "active" : ""}" data-report="${id}">${label}</button>`).join("")}</div>
-        <h3>Projects</h3>
-        <div class="seg" role="group" aria-label="Project selection"><button type="button" class="seg-btn" id="report-all-projects">All</button><button type="button" class="seg-btn" id="report-no-projects">None</button></div>
-        <div class="project-checks" id="report-projects">${state.projects.map((project) => `<label class="check-line"><input type="checkbox" data-report-project="${project.id}" ${selected.includes(project.id) ? "checked" : ""}> ${escapeHtml(project.name)}</label>`).join("") || `<p class="hint">No projects yet.</p>`}</div>
-        <h3>Display controls</h3>
-        ${[["showDate", "Show dates"], ["showTime", "Show exact times"], ["showDetails", "Task detail"]].map(([key, label]) => `<div class="switch-row"><span>${label}</span><button aria-label="Toggle ${label}" class="switch ${state.report[key] ? "on" : ""}" data-toggle="${key}"><span></span></button></div>`).join("")}
-        <p class="hint" style="margin-top:22px">Invoice reports default to dates without exact times. Adjustments apply instantly.</p>
+        <details class="advanced-options report-refine" id="report-refine"${refineOpen ? " open" : ""}>
+          <summary>Refine</summary>
+          <div class="report-refine-body">
+            <h3>Projects</h3>
+            <div class="seg" role="group" aria-label="Project selection"><button type="button" class="seg-btn" id="report-all-projects">All</button><button type="button" class="seg-btn" id="report-no-projects">None</button></div>
+            <div class="project-checks" id="report-projects">${state.projects.map((project) => `<label class="check-line"><input type="checkbox" data-report-project="${project.id}" ${selected.includes(project.id) ? "checked" : ""}> ${escapeHtml(project.name)}</label>`).join("") || `<p class="hint">No projects yet.</p>`}</div>
+            <h3>Display</h3>
+            ${[["showDate", "Show dates"], ["showTime", "Show exact times"], ["showDetails", "Task detail"]].map(([key, label]) => `<div class="switch-row"><span>${label}</span><button aria-label="Toggle ${label}" class="switch ${state.report[key] ? "on" : ""}" data-toggle="${key}"><span></span></button></div>`).join("")}
+            <p class="hint">Invoice reports start with dates, not exact times.</p>
+          </div>
+        </details>
       </aside>
       <article class="report-sheet">
         <header class="report-sheet-head">
@@ -1279,6 +1508,89 @@ async function copyNotionText() {
   }
 }
 
+function openPeopleDialog() {
+  fillPeopleDialog();
+  const dialog = document.querySelector("#people-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function fillPeopleDialog() {
+  const list = document.querySelector("#people-list");
+  const invite = document.querySelector("#invite-people");
+  const empty = document.querySelector("#invite-empty");
+  const manage = canManagePeople(state.user, state.members);
+  const people = boardPeople();
+  list.innerHTML = people.map(({ member, user, name }, index) => {
+    const role = normalizeBoardRole(member.role);
+    const roleControl = manage
+      ? `<label class="people-role"><span class="visually-hidden">Board role for ${escapeHtml(name)}</span><select data-member-role="${member.id}">${BOARD_ROLES.map((item) => `<option value="${item.id}" ${item.id === role ? "selected" : ""}>${item.label}</option>`).join("")}</select></label>`
+      : `<span class="people-role-label">${escapeHtml(roleCaption({ role }))}</span>`;
+    const remove = manage && canRemoveMember(state.user, member, state.members)
+      ? `<button type="button" class="button ghost danger" data-remove-member="${member.id}">Remove</button>`
+      : "";
+    return `<li class="people-row" data-member="${member.id}"><span class="face face-${(index % 3) + 1}">${escapeHtml(initials(name))}</span><div><strong>${escapeHtml(name)}</strong>${user.id === state.user.id ? "<small>You</small>" : ""}</div>${roleControl}${remove}</li>`;
+  }).join("");
+  const guests = invitableUsers(state.users, state.members);
+  if (manage && guests.length) {
+    invite.hidden = false;
+    empty.hidden = true;
+    document.querySelector("#invite-user").innerHTML = guests.map((user) => `<option value="${user.id}">${escapeHtml(user.name)}</option>`).join("");
+  } else {
+    invite.hidden = true;
+    invite.open = false;
+    empty.hidden = !manage;
+  }
+  list.querySelectorAll("[data-member-role]").forEach((select) => {
+    select.onchange = async () => {
+      if (!guardManage()) return;
+      const member = state.members.find((item) => item.id === select.dataset.memberRole);
+      if (!member || !canAssignRole(state.user, member, select.value, state.members)) {
+        select.value = member ? normalizeBoardRole(member.role) : "editor";
+        toast("Keep at least one admin");
+        return;
+      }
+      member.role = normalizeBoardRole(select.value);
+      await put("members", member);
+      toast("Role updated");
+      await refresh();
+    };
+  });
+  list.querySelectorAll("[data-remove-member]").forEach((button) => {
+    button.onclick = async () => {
+      const member = state.members.find((item) => item.id === button.dataset.removeMember);
+      const user = state.users.find((item) => item.id === member?.userId);
+      if (!member || !guardManage() || !canRemoveMember(state.user, member, state.members)) return;
+      const ok = await askConfirm({
+        title: "Remove from board?",
+        message: `${user?.name || "This person"} stays on this device but loses board access until invited again.`,
+        confirmLabel: "Remove"
+      });
+      if (!ok) return;
+      await remove("members", member.id);
+      toast("Removed from the board");
+      if (member.userId === state.user.id) document.querySelector("#people-dialog")?.close();
+      await refresh();
+    };
+  });
+}
+
+async function invitePerson() {
+  if (!guardManage()) return;
+  const userId = document.querySelector("#invite-user").value;
+  const role = normalizeBoardRole(document.querySelector("#invite-role").value);
+  if (!userId || memberFor(userId, state.members)) return;
+  await put("members", {
+    id: uuid(),
+    userId,
+    role,
+    invitedBy: state.user.id,
+    createdAt: new Date().toISOString()
+  });
+  document.querySelector("#invite-people").open = false;
+  toast("Invited to the board");
+  await refresh();
+}
+
 function bindGlobalChrome() {
   document.querySelector("#stop-recording").onclick = () => stopRecording(true);
   document.querySelector("#cancel-recording").onclick = () => stopRecording(false);
@@ -1294,11 +1606,34 @@ function bindGlobalChrome() {
   document.querySelector("#export-ledgerlane").onclick = exportLedgerLane;
   document.querySelector("#close-notion").onclick = document.querySelector("#cancel-notion").onclick = () => document.querySelector("#notion-dialog").close();
   document.querySelector("#copy-notion").onclick = copyNotionText;
+  document.querySelector("#close-people").onclick = document.querySelector("#done-people").onclick = () => document.querySelector("#people-dialog").close();
+  document.querySelector("#confirm-invite-person").onclick = invitePerson;
   document.addEventListener("click", (event) => {
     if (!event.target.closest("[data-menu]")) closeActionMenus();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeActionMenus();
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
+    if (document.querySelector("dialog[open]")) return;
+    if (!state.user || !canAccessBoard(state.user, state.members)) return;
+    if (event.key === "/") {
+      event.preventDefault();
+      if (state.view !== "board") {
+        state.view = "board";
+        render();
+      }
+      document.querySelector("#search")?.focus();
+      return;
+    }
+    if (event.key === "n" && canEdit()) {
+      event.preventDefault();
+      if (state.view !== "board") {
+        state.view = "board";
+        render();
+      }
+      openTask();
+    }
   });
 }
 

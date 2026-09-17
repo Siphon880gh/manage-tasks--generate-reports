@@ -31,6 +31,30 @@ export function availableColumnTypes(columns) {
   return COLUMN_TYPES.filter((item) => canAddColumnType(columns, item.id));
 }
 
+export function availableColumnTypesForEdit(columns, column) {
+  return COLUMN_TYPES.filter((item) => item.id === column?.type || canAddColumnType(columns, item.id));
+}
+
+export function canDeleteColumn(columns = []) {
+  return columns.length > 1;
+}
+
+export function destinationAfterColumnDelete(columns = [], columnId) {
+  const remaining = columns
+    .filter((column) => column.id !== columnId)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  if (!remaining.length) return null;
+  const gone = columns.find((column) => column.id === columnId);
+  return remaining.find((column) => column.type === gone?.type) || remaining[0];
+}
+
+export function confirmDeleteColumnMessage(name, taskCount = 0, destName = "") {
+  if (!taskCount) return `Delete column ${name}? This cannot be undone.`;
+  const noun = taskCount === 1 ? "task" : "tasks";
+  return `Delete column ${name}? ${taskCount} ${noun} will move to ${destName}.`;
+}
+
 export function isViewer(user) {
   return Boolean(user && user.role === "viewer");
 }
@@ -55,6 +79,77 @@ export function roleCaption(user) {
 
 export function canEdit(user) {
   return Boolean(user) && !isViewer(user);
+}
+
+export const BOARD_ROLES = [
+  { id: "admin", label: "Admin", hint: "Manage people and edit work" },
+  { id: "editor", label: "Editor", hint: "Create and change work" },
+  { id: "viewer", label: "View only", hint: "See the board, no edits" }
+];
+
+export function normalizeBoardRole(role) {
+  if (role === "admin" || role === "viewer") return role;
+  return "editor";
+}
+
+export function memberFor(userId, members = []) {
+  return members.find((member) => member.userId === userId) || null;
+}
+
+export function boardRole(user, members = []) {
+  if (!user) return null;
+  const member = memberFor(user.id, members);
+  return member ? normalizeBoardRole(member.role) : null;
+}
+
+export function canAccessBoard(user, members = []) {
+  return Boolean(boardRole(user, members));
+}
+
+export function canEditBoard(user, members = []) {
+  const role = boardRole(user, members);
+  return role === "admin" || role === "editor";
+}
+
+export function canManagePeople(user, members = []) {
+  return boardRole(user, members) === "admin";
+}
+
+export function adminCount(members = []) {
+  return members.filter((member) => normalizeBoardRole(member.role) === "admin").length;
+}
+
+export function canRemoveMember(actor, target, members = []) {
+  if (!canManagePeople(actor, members) || !target) return false;
+  if (normalizeBoardRole(target.role) === "admin" && adminCount(members) <= 1) return false;
+  return true;
+}
+
+export function canAssignRole(actor, target, nextRole, members = []) {
+  if (!canManagePeople(actor, members) || !target) return false;
+  if (normalizeBoardRole(target.role) === "admin" && normalizeBoardRole(nextRole) !== "admin" && adminCount(members) <= 1) {
+    return false;
+  }
+  return true;
+}
+
+export function invitableUsers(users = [], members = []) {
+  const taken = new Set(members.map((member) => member.userId));
+  return users.filter((user) => !taken.has(user.id));
+}
+
+export function seedMemberships(users = []) {
+  if (!users.length) return [];
+  const members = users.map((user) => ({
+    id: `member-${user.id}`,
+    userId: user.id,
+    role: normalizeBoardRole(user.role),
+    invitedBy: null,
+    createdAt: user.createdAt || ""
+  }));
+  if (members.some((member) => member.role === "admin")) return members;
+  const promote = members.find((member) => member.role === "editor") || members[0];
+  return members.map((member) => member.userId === promote.userId ? { ...member, role: "admin" } : member);
 }
 
 export function formatMoment(value, { showDate = true, showTime = false } = {}) {
@@ -121,4 +216,12 @@ export function confirmDeleteMessage(count, scopeLabel = "") {
   const noun = count === 1 ? "task" : "tasks";
   const scope = scopeLabel ? ` ${scopeLabel}` : "";
   return `Delete ${count} ${noun}${scope}? This cannot be undone.`;
+}
+
+export function naturalJoin(names, empty = "a board admin") {
+  const clean = (names || []).map((name) => String(name || "").trim()).filter(Boolean);
+  if (!clean.length) return empty;
+  if (clean.length === 1) return clean[0];
+  if (clean.length === 2) return `${clean[0]} or ${clean[1]}`;
+  return `${clean.slice(0, -1).join(", ")}, or ${clean[clean.length - 1]}`;
 }

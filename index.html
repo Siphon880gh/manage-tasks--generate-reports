@@ -11,8 +11,8 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app" aria-live="polite"></div>
-  <div id="toast" class="toast" role="status"></div>
+  <div id="app"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="record-hud" class="record-bar" hidden role="status">
     <div class="record-bar-inner">
       <span class="rec-dot" aria-hidden="true"></span>
@@ -31,6 +31,66 @@
       <footer class="form-actions">
         <button class="button" type="submit" value="cancel" id="confirm-cancel">Cancel</button>
         <button class="button primary danger-fill" type="submit" value="confirm" id="confirm-ok">Delete</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="people-dialog" class="people-dialog">
+    <form id="people-form">
+      <header class="modal-head">
+        <h2>People on this board</h2>
+        <button class="icon-button" type="button" id="close-people" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <p class="hint">These local accounts can open the Board and Reports.</p>
+        <ul id="people-list" class="people-list"></ul>
+        <details class="advanced-options" id="invite-people" hidden>
+          <summary>Invite someone</summary>
+          <div class="field">
+            <label for="invite-user">Person on this device</label>
+            <select id="invite-user" name="userId" required></select>
+          </div>
+          <div class="field">
+            <label for="invite-role">Board role</label>
+            <select id="invite-role" name="role">
+              <option value="editor">Editor — create and change work</option>
+              <option value="admin">Admin — manage people and edit</option>
+              <option value="viewer">View only — see the board, no edits</option>
+            </select>
+          </div>
+          <button class="button primary" type="button" id="confirm-invite-person">Invite</button>
+        </details>
+        <p id="invite-empty" class="hint" hidden>Everyone on this device already has access.</p>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="done-people">Done</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="column-dialog" class="column-dialog">
+    <form id="column-form">
+      <header class="modal-head">
+        <h2 id="column-dialog-title">Add column</h2>
+        <button class="icon-button" type="button" id="close-column" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <div class="field">
+          <label for="column-name">Column name</label>
+          <input id="column-name" name="name" required placeholder="e.g. Review" maxlength="40">
+        </div>
+        <p class="hint">That’s all most columns need. It starts as To do.</p>
+        <details class="advanced-options" id="column-type-options">
+          <summary>Column type</summary>
+          <div class="field">
+            <label for="column-type">Type</label>
+            <select id="column-type" name="type"></select>
+          </div>
+          <p class="hint" id="column-type-hint">To do and In progress can repeat. Complete can appear only once on a project.</p>
+        </details>
+      </div>
+      <footer class="form-actions">
+        <button class="button ghost danger" type="button" id="delete-column" hidden>Delete column</button>
+        <button class="button" type="button" id="cancel-column">Cancel</button>
+        <button class="button primary" type="submit" id="save-column">Add column</button>
       </footer>
     </form>
   </dialog>

@@ -29,17 +29,58 @@ function check(name, passed, detail = "") {
   if (!passed) throw new Error(`Verification failed: ${name}${detail ? ` (${detail})` : ""}`);
 }
 
+async function signOut(page) {
+  await page.locator("#account-button").click();
+  await page.locator("#sign-out-button").click();
+  await page.waitForSelector("#confirm-dialog[open]");
+  await page.locator("#confirm-ok").click();
+  await page.waitForSelector("#auth-form");
+}
+
+async function signIn(page, username, password) {
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Passphrase").fill(password);
+  await page.getByRole("button", { name: /Enter workspace/ }).click();
+}
+
+async function inviteToBoard(page, name, role) {
+  await page.locator("#open-people").click();
+  await page.waitForSelector("#people-dialog[open]");
+  const invite = page.locator("#invite-people");
+  if (await invite.evaluate((el) => !el.open)) await page.locator("#invite-people summary").click();
+  await page.locator("#invite-user").selectOption({ label: name });
+  await page.locator("#invite-role").selectOption(role);
+  await page.locator("#confirm-invite-person").click();
+  await page.waitForFunction((who) => document.querySelector("#people-list")?.innerText.includes(who), name);
+  await page.locator("#done-people").click();
+  await page.locator("#people-dialog").waitFor({ state: "hidden" });
+}
+
 try {
   await waitForServer();
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+  const editorUsername = `morgan-${Date.now()}`;
+  const viewerUsername = `viewer-${Date.now()}`;
+  const adminUsername = `admin-${Date.now()}`;
   await page.goto(`http://127.0.0.1:${PORT}`);
+  check("account type starts closed", await page.locator("#account-type-options").evaluate((el) => !el.open));
   await page.getByLabel("Display name").fill("Morgan Lee");
-  await page.getByLabel("Username").fill(`morgan-${Date.now()}`);
+  await page.getByLabel("Username").fill(editorUsername);
   await page.getByLabel("Passphrase").fill("local-demo-passphrase");
   await page.getByRole("button", { name: /Create local account/ }).click();
   await page.waitForSelector(".task-card");
   check("seeded board", await page.locator(".task-card").count() === 6, "expected 6 cards");
+  check("board title is compact", (await page.locator(".page-title").innerText()).trim() === "Delivery");
+  check("account is a menu", await page.locator("#account-button").getAttribute("aria-label") === "Account menu");
+  check("people trigger", await page.locator("#open-people").isVisible());
+  await page.locator("#open-people").click();
+  await page.waitForSelector("#people-dialog[open]");
+  check("people list shows owner", (await page.locator("#people-list").innerText()).includes("Morgan Lee"));
+  check("invite hidden when alone", await page.locator("#invite-people").isHidden());
+  await page.locator("#done-people").click();
+  await page.locator("#people-dialog").waitFor({ state: "hidden" });
 
   const checkboxes = page.locator(".task-card [data-select]");
   check("multi-select checkboxes", await checkboxes.count() === 6);
@@ -66,26 +107,49 @@ try {
   await page.locator("#confirm-cancel").click();
   check("delete-all cancel keeps tasks", await page.locator(".task-card").count() === 6);
 
-  check("new project control", await page.locator("#new-project").isVisible());
+  check("new project stays off the daily board", await page.locator("#new-project").count() === 0);
+  check("add column stays off the daily board", await page.locator("#add-column-toggle").count() === 0);
+  check("edit board control", await page.locator("#edit-board").isVisible());
+  await page.locator("#edit-board").click();
+  await page.waitForSelector("#structure-bar");
+  check("structure mode on", await page.locator("#structure-bar").isVisible());
+  check("structure picks a project so columns can be edited", await page.locator("[data-edit-column]").count() >= 3);
+  check("new project in structure mode", await page.locator("#new-project").isVisible());
   await page.locator("#new-project").click();
   await page.locator("#project-name").fill("Northstar");
   await page.getByRole("button", { name: "Create project" }).click();
-  await page.waitForFunction(() => document.querySelector("#project-filter")?.value && document.querySelector("#project-filter").value !== "all");
-  const projectLabel = await page.locator("#project-filter option:checked").textContent();
-  check("new project selected", projectLabel.trim() === "Northstar");
+  await page.waitForFunction(() => document.querySelector("#project-filter option:checked")?.textContent?.trim() === "Northstar");
+  check("new project selected", (await page.locator("#project-filter option:checked").textContent()).trim() === "Northstar");
   check("default columns on new project", await page.locator(".column").count() === 3);
   check("add column control", await page.locator("#add-column-toggle").isVisible());
   await page.locator("#add-column-toggle").click();
-  const typeLabels = await page.locator("#add-column-form select[name=type] option").allTextContents();
+  await page.waitForSelector("#column-dialog[open]");
+  check("add column is a modal", await page.locator("#column-dialog").evaluate((dialog) => dialog.open));
+  check("column type starts collapsed", await page.locator("#column-type-options").evaluate((el) => !el.open));
+  const typeLabels = await page.locator("#column-type option").allTextContents();
   check("complete type omitted when one exists", typeLabels.every((label) => !label.toLowerCase().startsWith("complete")));
-  await page.locator("#add-column-form input[name=name]").fill("Review");
-  await page.locator("#add-column-form").getByRole("button", { name: "Add column" }).click();
+  await page.locator("#column-name").fill("Review");
+  await page.locator("#column-form").getByRole("button", { name: "Add column" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".column").length === 4);
   check("custom column added", await page.locator(".column").count() === 4);
-  const rename = page.locator(".column-title").first();
-  await rename.fill("Ready queue");
-  await rename.dispatchEvent("change");
-  check("column renamed", await rename.inputValue() === "Ready queue");
+  check("column pencils in structure mode", await page.locator(".column-edit").count() === 4);
+  await page.locator(".column-edit").first().click();
+  await page.waitForSelector("#column-dialog[open]");
+  check("edit column is a modal", (await page.locator("#column-dialog-title").innerText()).trim() === "Edit column");
+  check("edit column shows type", await page.locator("#column-type-options").evaluate((el) => el.open));
+  await page.locator("#column-name").fill("Ready queue");
+  await page.locator("#column-form").getByRole("button", { name: "Save column" }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".column h2")].some((el) => (el.textContent || "").trim() === "Ready queue"));
+  check("column renamed", true);
+  await page.locator(".column-edit").last().click();
+  await page.waitForSelector("#column-dialog[open]");
+  check("delete column control", await page.locator("#delete-column").isVisible());
+  await page.locator("#delete-column").click();
+  await page.waitForSelector("#confirm-dialog[open]");
+  check("delete column confirms", (await page.locator("#confirm-message").innerText()).includes("Delete column Review"));
+  await page.locator("#confirm-ok").click();
+  await page.waitForFunction(() => document.querySelectorAll(".column").length === 3);
+  check("column deleted", await page.locator(".column").count() === 3);
 
   await page.locator("#project-filter").selectOption("all");
   await page.waitForSelector(".task-card");
@@ -94,6 +158,7 @@ try {
   check("clickup title field", await page.locator(".title-field input").isVisible());
   check("rtf editor", await page.locator("#task-description").isVisible());
   check("rtf toolbar", await page.locator(".rtf-toolbar [data-cmd]").count() >= 5);
+  check("task details collapsed", await page.locator("#task-details").evaluate((el) => !el.open));
   check("advanced collapsed", await page.locator("#advanced-options").getAttribute("open") === null);
   await page.locator("#attach-menu-toggle").click();
   check("file attach control", await page.locator("#attach-files").count() === 1);
@@ -127,6 +192,9 @@ try {
 
   await page.getByRole("button", { name: "Reports" }).first().click();
   await page.waitForSelector("#report-projects");
+  check("report title is compact", (await page.locator(".page-title").innerText()).trim() === "Proof");
+  check("report refine follows viewport", await page.locator("#report-refine").evaluate((el) => el.open === window.matchMedia("(min-width: 801px)").matches));
+  check("report projects stay usable on desktop", await page.locator("#report-no-projects").isVisible());
   const projectBoxes = page.locator("[data-report-project]");
   check("report project checkboxes", await projectBoxes.count() >= 4);
   const firstId = await projectBoxes.first().getAttribute("data-report-project");
@@ -188,19 +256,28 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".task-card").length === 1);
   check("import replace swaps the board", await page.locator(".task-card").count() === 1);
 
-  await page.locator("#account-button").click();
-  await page.waitForSelector("#confirm-dialog[open]");
-  await page.locator("#confirm-ok").click();
-  await page.waitForSelector("#auth-form");
+  await signOut(page);
   await page.getByLabel("Display name").fill("Viewer User");
-  await page.getByLabel("Username").fill(`viewer-${Date.now()}`);
+  await page.getByLabel("Username").fill(viewerUsername);
   await page.getByLabel("Passphrase").fill("viewer-passphrase");
+  await page.locator("#account-type-options summary").click();
   await page.locator("#role-viewer").check();
   await page.getByRole("button", { name: /Create local account/ }).click();
+  await page.waitForSelector("[data-role=none]");
+  check("viewer waits for invite", await page.locator("#waiting-access").count() === 1);
+  check("waiting names an admin", (await page.locator("#waiting-access").innerText()).includes("Morgan Lee"));
+  check("waiting has sign out", await page.locator("#waiting-sign-out").isVisible());
+  await signOut(page);
+  await signIn(page, editorUsername, "local-demo-passphrase");
+  await page.waitForSelector("#open-people");
+  await inviteToBoard(page, "Viewer User", "viewer");
+  await signOut(page);
+  await signIn(page, viewerUsername, "viewer-passphrase");
   await page.waitForSelector("[data-role=viewer]");
   check("viewer shell", await page.locator(".app-shell").getAttribute("data-role") === "viewer");
   check("viewer sees board", await page.locator(".task-card").count() >= 1);
   check("viewer has no new task", await page.locator("#new-task").count() === 0);
+  check("viewer cannot edit board structure", await page.locator("#edit-board").count() === 0);
   check("viewer has no import", await page.locator("#import-tasks").count() === 0);
   check("viewer has no delete all", await page.locator("#delete-all-tasks").count() === 0);
   check("viewer can copy for notion", await page.locator("#export-tasks").innerText() === "Copy for Notion");
@@ -219,15 +296,28 @@ try {
   await page.waitForSelector("text=outcome-oriented");
   check("viewer can change report lens", true);
 
-  await page.locator("#account-button").click();
-  await page.waitForSelector("#confirm-dialog[open]");
-  await page.locator("#confirm-ok").click();
-  await page.waitForSelector("#auth-form");
+  await page.locator("#open-people").click();
+  await page.waitForSelector("#people-dialog[open]");
+  check("viewer sees people", (await page.locator("#people-list").innerText()).includes("Viewer User"));
+  check("viewer cannot invite", await page.locator("#invite-people").isHidden());
+  await page.locator("#done-people").click();
+
+  await signOut(page);
+  await page.getByRole("button", { name: "Create account" }).click();
   await page.getByLabel("Display name").fill("Admin User");
-  await page.getByLabel("Username").fill(`admin-${Date.now()}`);
+  await page.getByLabel("Username").fill(adminUsername);
   await page.getByLabel("Passphrase").fill("admin-passphrase");
+  await page.locator("#account-type-options summary").click();
   await page.locator("#role-admin").check();
   await page.getByRole("button", { name: /Create local account/ }).click();
+  await page.waitForSelector("[data-role=none]");
+  check("admin waits for invite", await page.locator("#waiting-access").count() === 1);
+  await signOut(page);
+  await signIn(page, editorUsername, "local-demo-passphrase");
+  await page.waitForSelector("#open-people");
+  await inviteToBoard(page, "Admin User", "admin");
+  await signOut(page);
+  await signIn(page, adminUsername, "admin-passphrase");
   await page.waitForSelector("[data-role=admin]");
   check("admin shell", await page.locator(".app-shell").getAttribute("data-role") === "admin");
   await page.getByRole("button", { name: "Board" }).first().click();
