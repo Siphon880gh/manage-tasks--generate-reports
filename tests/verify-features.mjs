@@ -60,6 +60,7 @@ async function inviteToBoard(page, name, role) {
 try {
   await waitForServer();
   const browser = await chromium.launch({ headless: true });
+  try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
   const editorUsername = `morgan-${Date.now()}`;
   const viewerUsername = `viewer-${Date.now()}`;
@@ -153,6 +154,23 @@ try {
 
   await page.locator("#project-filter").selectOption("all");
   await page.waitForSelector(".task-card");
+  check("tag filter chips", await page.locator("#tag-filters [data-filter-tag]").count() >= 2);
+  check("color filter chips", await page.locator("#color-filters [data-filter-color]").count() === 6);
+  const billingChip = page.locator("#tag-filters [data-filter-tag]").filter({ hasText: /^billing$/i });
+  const opsChip = page.locator("#tag-filters [data-filter-tag]").filter({ hasText: /^ops$/i });
+  await billingChip.click();
+  check("tag filter matches any selected tag", await page.locator(".task-card").count() === 3);
+  await opsChip.click();
+  check("multiple tags are OR", await page.locator(".task-card").count() === 5);
+  await page.locator('[data-filter-color="coral"]').click();
+  check("combined tag and color filters AND", await page.locator(".task-card").count() === 2);
+  await page.locator("#clear-filters").click();
+  check("clear filters shows every card", await page.locator(".task-card").count() === 6);
+  await page.locator('[data-filter-color="coral"]').click();
+  check("color filter alone", await page.locator(".task-card").count() === 2);
+  await page.locator("#clear-filters").click();
+  check("clear color filter", await page.locator(".task-card").count() === 6);
+
   await page.locator(".task-card").first().click();
   await page.waitForSelector("#task-dialog[open]");
   check("clickup title field", await page.locator(".title-field input").isVisible());
@@ -160,6 +178,14 @@ try {
   check("rtf toolbar", await page.locator(".rtf-toolbar [data-cmd]").count() >= 5);
   check("task details collapsed", await page.locator("#task-details").evaluate((el) => !el.open));
   check("advanced collapsed", await page.locator("#advanced-options").getAttribute("open") === null);
+  await page.locator("#task-details summary").click();
+  check("tag picker", await page.locator("#task-tag-list").isVisible());
+  await page.locator("#task-new-tag").fill("urgent");
+  await page.locator("#add-task-tag").click();
+  await page.waitForFunction(() => (document.querySelector("#task-tag-list")?.innerText || "").toLowerCase().includes("urgent"));
+  check("create tag from task", (await page.locator("#task-tag-list").innerText()).toLowerCase().includes("urgent"));
+  await page.locator('#task-color-list input[value="gold"]').check();
+  check("assign card color", await page.locator('#task-color-list input[value="gold"]').isChecked());
   await page.locator("#attach-menu-toggle").click();
   check("file attach control", await page.locator("#attach-files").count() === 1);
   check("task record control", await page.locator("#record-screen").isVisible());
@@ -168,6 +194,12 @@ try {
   await page.locator("#task-form").getByRole("button", { name: "Save task" }).click();
   await page.locator("#task-dialog").waitFor({ state: "hidden" });
   check("task dialog closed after save", true);
+  check("card shows created tag", await page.locator(".card-tag").filter({ hasText: /^urgent$/i }).count() === 1);
+  check("card color persisted", await page.locator('.task-card[data-color="gold"]').count() >= 2);
+  await page.locator("#tag-filters [data-filter-tag]").filter({ hasText: /^urgent$/i }).click();
+  check("filter by created tag", await page.locator(".task-card").count() === 1);
+  await page.locator("#clear-filters").click();
+  check("clear after created tag", await page.locator(".task-card").count() === 6);
 
   await openBoardMenu(page);
   check("board record control", (await page.locator("#record-board").innerText()).includes("Record screen"));
@@ -206,6 +238,38 @@ try {
   await page.getByRole("button", { name: "Project manager" }).click();
   await page.waitForSelector("text=Delivery detail");
   check("report lens still works with project filters", true);
+  await page.getByRole("button", { name: "Invoice settlement" }).click();
+  await page.waitForSelector("text=prepared for settlement");
+
+  check("editor can edit report", await page.locator("#edit-report").count() === 1);
+  check("report starts locked", await page.locator(".report-sheet.is-editing").count() === 0);
+  check("no insert rails until edit mode", await page.locator(".report-insert").count() === 0);
+  await page.locator("#edit-report").click();
+  await page.waitForSelector(".report-sheet.is-editing");
+  check("report edit mode on", await page.locator(".report-sheet.is-editing").count() === 1);
+  check("insert rails between sections", await page.locator(".report-insert").count() >= 4);
+  check("google drive hint", (await page.locator(".report-edit-bar").innerText()).toLowerCase().includes("google"));
+  await page.locator('[data-report-slot="after-stats"]:not([data-after])').click();
+  await page.waitForSelector("[data-report-block]");
+  const note = page.locator("[data-report-block]").first();
+  await note.click();
+  await page.keyboard.type("Client cover note");
+  await page.locator("#done-report-edit").click();
+  await page.waitForFunction(() => !document.querySelector(".report-sheet.is-editing"));
+  check("leaving edit mode locks the sheet", await page.locator(".report-sheet.is-editing").count() === 0);
+  check("note persists after leaving edit", (await page.locator(".report-note").innerText()).includes("Client cover note"));
+  check("note is not editable when locked", await page.locator("[data-report-block]").count() === 0);
+  await page.getByRole("button", { name: "Project manager" }).click();
+  await page.waitForSelector("text=Delivery detail");
+  check("other lens does not inherit invoice notes", await page.locator(".report-note").count() === 0);
+  await page.getByRole("button", { name: "Invoice settlement" }).click();
+  await page.waitForSelector("text=prepared for settlement");
+  check("note stays on its lens", (await page.locator(".report-note").innerText()).includes("Client cover note"));
+  await page.reload();
+  await page.waitForSelector(".task-card");
+  await page.getByRole("button", { name: "Reports" }).first().click();
+  await page.waitForSelector(".report-sheet");
+  check("note persists after reload", (await page.locator(".report-note").innerText()).includes("Client cover note"));
 
   await page.getByRole("button", { name: "Board" }).first().click();
   await page.waitForSelector("#board-menu-toggle");
@@ -282,6 +346,8 @@ try {
   check("viewer has no delete all", await page.locator("#delete-all-tasks").count() === 0);
   check("viewer can copy for notion", await page.locator("#export-tasks").innerText() === "Copy for Notion");
   check("viewer cards are not draggable", await page.locator(".task-card[draggable=true]").count() === 0);
+  check("viewer can use tag filters", await page.locator("#tag-filters [data-filter-tag]").count() >= 1);
+  check("viewer cannot create tags", await page.locator("#new-tag-form").count() === 0);
   await page.locator(".task-card").first().click();
   await page.waitForSelector("#task-dialog[open]");
   check("viewer can open a task", await page.locator("#task-dialog").evaluate((dialog) => dialog.open));
@@ -292,6 +358,9 @@ try {
   await page.getByRole("button", { name: "Reports" }).first().click();
   await page.waitForSelector(".report-sheet");
   check("viewer can open reports", await page.locator(".report-sheet").count() === 1);
+  check("viewer cannot edit report", await page.locator("#edit-report").count() === 0);
+  check("viewer cannot type report notes", await page.locator(".report-sheet [contenteditable='true']").count() === 0);
+  check("viewer still sees saved notes", (await page.locator(".report-note").innerText()).includes("Client cover note"));
   await page.getByRole("button", { name: "Stakeholder pulse" }).click();
   await page.waitForSelector("text=outcome-oriented");
   check("viewer can change report lens", true);
@@ -327,8 +396,10 @@ try {
   await mkdir("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/ledgerlane-features.png", fullPage: true });
   await writeFile("artifacts/feature-verification.json", JSON.stringify({ passed: true, results }, null, 2));
-  await browser.close();
   console.log(`\nVerified ${results.length} feature checks. Screenshot: artifacts/ledgerlane-features.png`);
+  } finally {
+    await browser.close();
+  }
 } catch (error) {
   await writeFile("artifacts/feature-verification.json", JSON.stringify({ passed: false, results, error: error.message }, null, 2)).catch(() => {});
   console.error(error);

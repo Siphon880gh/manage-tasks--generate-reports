@@ -171,12 +171,89 @@ export function taskProgress(tasks) {
   return Math.round(tasks.filter((task) => task.status === "done").length / tasks.length * 100);
 }
 
-export function filterTasks(tasks, { query = "", owner = "all", project = "all" } = {}) {
+export const CARD_COLORS = [
+  { id: "none", label: "None", fill: "#fffefa" },
+  { id: "acid", label: "Acid", fill: "#eef6b8" },
+  { id: "blue", label: "Blue", fill: "#d7e2ff" },
+  { id: "coral", label: "Coral", fill: "#ffdcd3" },
+  { id: "gold", label: "Gold", fill: "#ffe08a" },
+  { id: "sage", label: "Sage", fill: "#d7ead0" }
+];
+
+export function normalizeCardColor(value) {
+  const id = String(value || "none").trim() || "none";
+  return CARD_COLORS.some((color) => color.id === id) ? id : "none";
+}
+
+export function cardColorMeta(value) {
+  const id = normalizeCardColor(value);
+  return CARD_COLORS.find((color) => color.id === id) || CARD_COLORS[0];
+}
+
+export function normalizeTagName(value = "") {
+  return String(value).replace(/\s+/g, " ").trim().slice(0, 32);
+}
+
+export function normalizeTagIds(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map((id) => String(id || "").trim()).filter(Boolean))];
+}
+
+export function findTagByName(tags = [], name) {
+  const needle = normalizeTagName(name).toLowerCase();
+  if (!needle) return null;
+  return tags.find((tag) => normalizeTagName(tag.name).toLowerCase() === needle) || null;
+}
+
+export function toggleListValue(list = [], value) {
+  const current = Array.isArray(list) ? [...list] : [];
+  const key = String(value);
+  const index = current.findIndex((item) => String(item) === key);
+  if (index >= 0) current.splice(index, 1);
+  else current.push(key);
+  return current;
+}
+
+export function emptyBoardFilters() {
+  return { query: "", owner: "all", project: "all", tags: [], colors: [] };
+}
+
+export function boardFiltersActive(filters = {}) {
+  return Boolean(
+    String(filters.query || "").trim()
+    || (filters.owner && filters.owner !== "all")
+    || (filters.project && filters.project !== "all")
+    || (Array.isArray(filters.tags) && filters.tags.length)
+    || (Array.isArray(filters.colors) && filters.colors.length)
+  );
+}
+
+export function taskMatchesTags(task, tagIds = []) {
+  const wanted = normalizeTagIds(tagIds);
+  if (!wanted.length) return true;
+  const have = new Set(normalizeTagIds(task?.tagIds));
+  return wanted.some((id) => have.has(id));
+}
+
+export function taskMatchesColors(task, colors = []) {
+  const wanted = [...new Set((Array.isArray(colors) ? colors : []).map(normalizeCardColor))];
+  if (!wanted.length) return true;
+  return wanted.includes(normalizeCardColor(task?.color));
+}
+
+export function filterTasks(tasks, {
+  query = "", owner = "all", project = "all", tags = [], colors = [], tagCatalog = []
+} = {}) {
   const needle = query.trim().toLowerCase();
+  const namesById = new Map((tagCatalog || []).map((tag) => [tag.id, tag.name]));
   return tasks.filter((task) => {
-    const text = `${task.title} ${task.project} ${task.ownerName} ${plainText(task.description)}`.toLowerCase();
+    const tagNames = normalizeTagIds(task.tagIds).map((id) => namesById.get(id) || "").join(" ");
+    const text = `${task.title} ${task.project} ${task.ownerName} ${plainText(task.description)} ${tagNames}`.toLowerCase();
     const projectMatch = project === "all" || task.projectId === project || task.project === project;
-    return (!needle || text.includes(needle)) && (owner === "all" || task.ownerId === owner) && projectMatch;
+    return (!needle || text.includes(needle))
+      && (owner === "all" || task.ownerId === owner)
+      && projectMatch
+      && taskMatchesTags(task, tags)
+      && taskMatchesColors(task, colors);
   });
 }
 
@@ -192,6 +269,99 @@ export function reportRows(tasks, type, options = {}) {
   if (type === "invoice") return scoped.filter((task) => task.status === "done").map((task) => ({ ...task, result: task.rate ? `$${Number(task.rate).toLocaleString()}` : "Ready" }));
   if (type === "stakeholder") return scoped.map((task) => ({ ...task, result: task.status === "done" ? "Delivered" : task.status === "progress" ? "In flight" : "Planned" }));
   return scoped.map((task) => ({ ...task, result: task.status === "done" ? "Complete" : task.priority }));
+}
+
+export const REPORT_TYPES = ["invoice", "project", "stakeholder"];
+
+export const REPORT_SLOTS = [
+  { id: "start", label: "above the title" },
+  { id: "after-head", label: "below the title" },
+  { id: "after-stats", label: "between the summary and work items" },
+  { id: "after-table", label: "below the work items" }
+];
+
+export function emptyReportLayouts() {
+  return Object.fromEntries(REPORT_TYPES.map((id) => [id, { id, blocks: [] }]));
+}
+
+export function normalizeReportBlocks(blocks = []) {
+  const slots = new Set(REPORT_SLOTS.map((slot) => slot.id));
+  return (Array.isArray(blocks) ? blocks : [])
+    .filter((block) => block && slots.has(block.slot) && block.id)
+    .map((block, index) => ({
+      id: String(block.id),
+      slot: block.slot,
+      html: String(block.html || ""),
+      order: Number.isFinite(Number(block.order)) ? Number(block.order) : (index + 1) * 10
+    }))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+}
+
+export function reindexReportBlocks(blocks = []) {
+  return REPORT_SLOTS.flatMap((slot) => blocksForSlot(blocks, slot.id).map((block, index) => ({
+    ...block,
+    order: (index + 1) * 10
+  })));
+}
+
+export function blocksForSlot(blocks, slot) {
+  return normalizeReportBlocks(blocks).filter((block) => block.slot === slot);
+}
+
+export function nextReportBlockOrder(blocks, slot, afterId) {
+  const inSlot = blocksForSlot(blocks, slot);
+  if (!inSlot.length) return 10;
+  if (afterId) {
+    const index = inSlot.findIndex((block) => block.id === afterId);
+    if (index >= 0) {
+      const current = inSlot[index];
+      const following = inSlot[index + 1];
+      if (!following) return current.order + 10;
+      return (current.order + following.order) / 2;
+    }
+  }
+  return inSlot[inSlot.length - 1].order + 10;
+}
+
+export function reportBlockHasContent(html = "") {
+  const raw = String(html);
+  if (/<img\b/i.test(raw) || /<a\b/i.test(raw)) return true;
+  return Boolean(plainText(raw));
+}
+
+export function googleWorkspaceKind(url = "") {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === "docs.google.com" || host.endsWith(".docs.google.com")) return "docs";
+    if (host === "drive.google.com" || host.endsWith(".drive.google.com")) return "drive";
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeHttpUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw || /^mailto:/i.test(raw)) return raw;
+  const withScheme = /^(https?:)\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withScheme);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+export function defaultLinkLabel(url = "") {
+  const kind = googleWorkspaceKind(url);
+  if (kind === "docs") return "Google Doc";
+  if (kind === "drive") return "Google Drive";
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return String(url || "Link");
+  }
 }
 
 export function toCsv(rows, columns) {

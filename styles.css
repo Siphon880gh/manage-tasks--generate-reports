@@ -196,4 +196,88 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .page-head-work .page-title{font-size:1.5rem}
   .fab-new-task{display:block;position:fixed;right:16px;bottom:72px;z-index:19}
   .structure-bar{align-items:start}
+  .report-edit-bar{align-items:start}
+  .report-note-tools{flex-wrap:wrap}
+}
+
+.report-edit-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin:0 0 22px;padding:12px 14px;border:2px solid var(--ink);background:#efece1;box-shadow:3px 3px 0 var(--ink)}
+.report-edit-bar .hint{margin:0;max-width:62ch}
+.report-insert{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin:0 0 18px;padding:10px;border:2px dashed #9a978c;background:transparent;color:var(--ink);font-weight:700;box-shadow:none}
+.report-insert:hover,.report-insert:focus-visible{background:#cfddff;border-color:var(--blue)}
+.report-note{margin:0 0 22px;border:2px solid var(--ink);background:var(--paper)}
+.report-note.is-readonly{border-color:#c9c6bb;background:var(--white);box-shadow:none}
+.report-note-body{padding:16px 18px;line-height:1.55;max-width:65ch;font-size:16px}
+.report-note-body p,.report-note-editor p{margin:0 0 .7em}
+.report-note-body p:last-child,.report-note-editor p:last-child{margin-bottom:0}
+.report-note-tools{display:flex;align-items:stretch;justify-content:space-between;border-bottom:2px solid var(--ink);background:#efece1}
+.report-note-tools .rtf-toolbar{border:0;flex:1}
+.report-note-remove{width:44px;min-width:44px}
+.report-note-editor{min-height:120px;background:var(--white)}
+.report-note.is-editing .report-insert{margin:0;border:0;border-top:2px dashed #c9c6bb}
+.report-note a,.report-note-body a,.report-note-editor a{color:var(--blue);font-weight:700}
+.report-link-docs::after,.report-link-drive::after{margin-left:.35em;font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);font-weight:700}
+.report-link-docs::after{content:"Docs ↗"}
+.report-link-drive::after{content:"Drive ↗"}
+.report-note-body img,.report-note-editor img{max-width:100%;border:2px solid var(--ink);margin:8px 0}
+@media print{
+  .report-edit-bar,.report-insert,.report-note-tools,#edit-report{display:none!important}
+  .report-note{border:0;background:transparent}
+  .report-note-body{padding:0 0 16px;max-width:none}
+}
+
+:root{
+  --gold:#c48400;
+  --sage:#3f6b3a;
+  --fill-none:var(--white);
+  --fill-acid:#eef6b8;
+  --fill-blue:#d7e2ff;
+  --fill-coral:#ffdcd3;
+  --fill-gold:#ffe08a;
+  --fill-sage:#d7ead0
+}
+.facet-bar{border:2px solid var(--ink);background:var(--white);margin:-2px 0 18px;padding:12px 16px;display:grid;gap:12px}
+.facet-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.facet-label,.color-picker legend{font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;min-width:56px}
+.facet-chips{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1}
+.facet-empty{color:var(--muted);font-size:16px}
+.facet-chip,.color-swatch,.card-tag,.tag-option,.color-choice{border:2px solid var(--ink);background:var(--white);box-shadow:none}
+.facet-chip{padding:6px 10px;font-size:14px;font-weight:700}
+.facet-chip[aria-pressed="true"],.color-swatch[aria-pressed="true"]{background:var(--ink);color:#fffefa}
+.color-swatch,.color-choice{display:inline-flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;font-size:14px;font-weight:700}
+.color-swatch-fill{width:20px;height:20px;border:2px solid var(--ink);background:var(--fill-none);flex:0 0 20px}
+.color-swatch-fill[data-color="acid"]{background:var(--fill-acid)}
+.color-swatch-fill[data-color="blue"]{background:var(--fill-blue)}
+.color-swatch-fill[data-color="coral"]{background:var(--fill-coral)}
+.color-swatch-fill[data-color="gold"]{background:var(--fill-gold)}
+.color-swatch-fill[data-color="sage"]{background:var(--fill-sage)}
+.color-swatch-fill[data-color="none"]{background:var(--white)}
+.new-tag-form,.new-tag-row{display:flex;align-items:center;gap:8px}
+.new-tag-form input,.new-tag-row input{border:2px solid var(--ink);background:var(--white);padding:8px 10px;min-width:120px}
+.filter-status{margin:0;font-size:16px;line-height:1.45;color:var(--ink)}
+.task-card .project{margin-bottom:8px}
+.card-tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.card-tag{padding:4px 8px;font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;background:#efece1}
+.task-card[data-color="acid"]{background:var(--fill-acid);border-left:8px solid var(--acid)}
+.task-card[data-color="blue"]{background:var(--fill-blue);border-left:8px solid var(--blue)}
+.task-card[data-color="coral"]{background:var(--fill-coral);border-left:8px solid var(--coral)}
+.task-card[data-color="gold"]{background:var(--fill-gold);border-left:8px solid var(--gold)}
+.task-card[data-color="sage"]{background:var(--fill-sage);border-left:8px solid var(--sage)}
+.task-card.is-selected{box-shadow:3px 3px 0 var(--blue);outline:2px solid var(--blue)}
+.task-card.is-selected[data-color="none"]{background:#fff7c8}
+.task-card.is-selected[data-color="acid"]{background:var(--fill-acid)}
+.task-card.is-selected[data-color="blue"]{background:var(--fill-blue)}
+.task-card.is-selected[data-color="coral"]{background:var(--fill-coral)}
+.task-card.is-selected[data-color="gold"]{background:var(--fill-gold)}
+.task-card.is-selected[data-color="sage"]{background:var(--fill-sage)}
+.task-meta-block{display:grid;gap:8px;margin-top:12px}
+.tag-option-list{display:flex;flex-wrap:wrap;gap:8px}
+.tag-option{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;font-size:14px;font-weight:700;min-height:44px}
+.tag-option input,.color-choice input{width:18px;height:18px;accent-color:var(--blue)}
+.color-picker{border:0;padding:0;margin:12px 0 0;min-width:0}
+.color-picker-row{display:flex;flex-wrap:wrap;gap:8px}
+.color-choice{min-height:44px;cursor:pointer}
+@media(max-width:800px){
+  .facet-bar{padding:12px}
+  .new-tag-form{width:100%}
+  .new-tag-form input{flex:1}
 }

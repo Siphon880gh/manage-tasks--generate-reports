@@ -1,17 +1,20 @@
 import {
-  BOARD_ROLES, COLUMN_TYPES, DEFAULT_COLUMNS, applyDropOrder, availableColumnTypes, availableColumnTypesForEdit, boardRole,
-  canAccessBoard, canAddColumnType, canAssignRole, canDeleteColumn, canEditBoard, canManagePeople, canRemoveMember,
-  columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage, destinationAfterColumnDelete,
-  filterTasks, formatMoment, invitableUsers, memberFor,
-  naturalJoin, normalizeBoardRole, plainText, reportRows, roleCaption, seedMemberships, sortTasks, statusToColumnType,
-  taskProgress, toCsv
+  BOARD_ROLES, CARD_COLORS, COLUMN_TYPES, DEFAULT_COLUMNS, applyDropOrder, availableColumnTypes, availableColumnTypesForEdit,
+  boardFiltersActive, boardRole, canAccessBoard, canAddColumnType, canAssignRole, canDeleteColumn, canEditBoard,
+  canManagePeople, canRemoveMember, columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage,
+  destinationAfterColumnDelete, blocksForSlot, defaultLinkLabel, emptyBoardFilters, emptyReportLayouts, filterTasks,
+  findTagByName, formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
+  normalizeBoardRole, normalizeCardColor, normalizeHttpUrl, normalizeReportBlocks, normalizeTagIds, normalizeTagName,
+  plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, sortTasks,
+  statusToColumnType, taskProgress, toCsv, toggleListValue
 } from "./app-core.mjs";
 import {
   buildClickUpCsv, buildLedgerLaneBackup, buildNotionMarkdown, columnTypeForImport, importPreview, parseImport
 } from "./import-export.mjs";
 
 const DB_NAME = "ledgerlane-db";
-const DB_VERSION = 3;
+const DB_VERSION = 5;
+const REPORT_IMAGE_MAX = 6 * 1024 * 1024;
 const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "P", "BR", "UL", "OL", "LI", "A", "IMG", "DIV", "SPAN", "H3"]);
 const state = {
   user: null,
@@ -20,10 +23,14 @@ const state = {
   tasks: [],
   projects: [],
   columns: [],
+  tags: [],
   view: "board",
   authMode: "signup",
-  filters: { query: "", owner: "all", project: "all" },
+  filters: emptyBoardFilters(),
   report: { type: "invoice", showDate: true, showTime: false, showDetails: true, projectIds: null },
+  reportLayouts: emptyReportLayouts(),
+  reportEditing: false,
+  reportFocusBlockId: null,
   selection: new Set(),
   drag: { taskId: null, overColumnId: null, insertIndex: null },
   recording: { active: false, recorder: null, stream: null, chunks: [], taskId: null, startedAt: 0, timer: null },
@@ -45,8 +52,17 @@ const dbPromise = new Promise((resolve, reject) => {
     if (!db.objectStoreNames.contains("columns")) db.createObjectStore("columns", { keyPath: "id" }).createIndex("projectId", "projectId");
     if (!db.objectStoreNames.contains("attachments")) db.createObjectStore("attachments", { keyPath: "id" }).createIndex("taskId", "taskId");
     if (!db.objectStoreNames.contains("members")) db.createObjectStore("members", { keyPath: "id" }).createIndex("userId", "userId", { unique: true });
+    if (!db.objectStoreNames.contains("reportLayouts")) db.createObjectStore("reportLayouts", { keyPath: "id" });
+    if (!db.objectStoreNames.contains("tags")) db.createObjectStore("tags", { keyPath: "id" });
   };
-  request.onsuccess = () => resolve(request.result);
+  request.onsuccess = () => {
+    const db = request.result;
+    db.onversionchange = () => db.close();
+    resolve(db);
+  };
+  request.onblocked = () => {
+    if (root && !root.innerHTML) root.innerHTML = `<p class="auth-error">This workspace is updating local storage. Close other LedgerLane tabs, then refresh.</p>`;
+  };
   request.onerror = () => reject(request.error);
 });
 
@@ -80,11 +96,94 @@ function sanitizeHtml(html) {
       const name = attr.name.toLowerCase();
       const value = attr.value || "";
       const hrefOk = el.tagName === "A" && name === "href" && /^(https?:|mailto:)/i.test(value);
+      const linkMeta = el.tagName === "A" && (
+        (name === "target" && value === "_blank")
+        || name === "rel"
+        || (name === "class" && /^report-link-(docs|drive)$/.test(value))
+      );
       const imgOk = el.tagName === "IMG" && ((name === "src" && /^(https?:|data:image\/|blob:)/i.test(value)) || name === "alt");
-      if (!hrefOk && !imgOk) el.removeAttribute(attr.name);
+      if (!hrefOk && !linkMeta && !imgOk) el.removeAttribute(attr.name);
     });
   });
   return doc.body.innerHTML;
+}
+
+let reportSaveTimer = 0;
+let reportLinkContext = { editor: null, range: null };
+
+function prepareReportHtml(html) {
+  const box = document.createElement("div");
+  box.innerHTML = sanitizeHtml(html);
+  box.querySelectorAll("a[href]").forEach((anchor) => {
+    const raw = anchor.getAttribute("href") || "";
+    if (/^mailto:/i.test(raw)) return;
+    const href = normalizeHttpUrl(raw);
+    if (!href) {
+      anchor.replaceWith(...anchor.childNodes);
+      return;
+    }
+    anchor.setAttribute("href", href);
+    anchor.setAttribute("target", "_blank");
+    anchor.setAttribute("rel", "noopener noreferrer");
+    const kind = googleWorkspaceKind(href);
+    anchor.classList.remove("report-link-docs", "report-link-drive");
+    if (kind === "docs") anchor.classList.add("report-link-docs");
+    if (kind === "drive") anchor.classList.add("report-link-drive");
+  });
+  return box.innerHTML;
+}
+
+function currentReportLayout(type = state.report.type) {
+  if (!state.reportLayouts[type]) state.reportLayouts[type] = { id: type, blocks: [] };
+  return state.reportLayouts[type];
+}
+
+function visibleReportType() {
+  return document.querySelector(".report-sheet")?.dataset.reportType || state.report.type;
+}
+
+function flushReportEditors() {
+  const editors = document.querySelectorAll("[data-report-block]");
+  if (!editors.length) return false;
+  const layout = currentReportLayout(visibleReportType());
+  let changed = false;
+  editors.forEach((editor) => {
+    const block = layout.blocks.find((item) => item.id === editor.dataset.reportBlock);
+    if (!block) return;
+    const html = sanitizeHtml(editor.innerHTML);
+    if (block.html !== html) {
+      block.html = html;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function captureReportEditor(editor) {
+  const layout = currentReportLayout(visibleReportType());
+  const block = layout.blocks.find((item) => item.id === editor.dataset.reportBlock);
+  if (block) block.html = editor.innerHTML;
+}
+
+function scheduleReportSave() {
+  clearTimeout(reportSaveTimer);
+  reportSaveTimer = setTimeout(() => { persistReportLayout(); }, 400);
+}
+
+async function persistReportLayout(type = visibleReportType()) {
+  const layout = currentReportLayout(type);
+  layout.blocks = reindexReportBlocks(layout.blocks);
+  await put("reportLayouts", { id: type, blocks: layout.blocks });
+}
+
+async function loadReportLayouts() {
+  const stored = await all("reportLayouts");
+  const next = emptyReportLayouts();
+  for (const row of stored) {
+    if (!next[row.id]) continue;
+    next[row.id] = { id: row.id, blocks: normalizeReportBlocks(row.blocks) };
+  }
+  state.reportLayouts = next;
 }
 
 function toast(message) {
@@ -201,17 +300,23 @@ async function ensureBoardMembers() {
 }
 
 async function refresh() {
+  if (flushReportEditors()) await persistReportLayout();
   state.users = await all("users");
   state.members = await all("members");
   state.tasks = await all("tasks");
   state.projects = await all("projects");
   state.columns = await all("columns");
+  state.tags = (await all("tags")).slice().sort((a, b) => a.name.localeCompare(b.name));
+  await loadReportLayouts();
   await ensureBoardMembers();
   const id = localStorage.getItem("ledgerlane-session");
   state.user = state.users.find((u) => u.id === id) || null;
   await migrateWorkspace();
   const valid = new Set(state.tasks.map((task) => task.id));
   state.selection = new Set([...state.selection].filter((taskId) => valid.has(taskId)));
+  const knownTags = new Set(state.tags.map((tag) => tag.id));
+  state.filters.tags = normalizeTagIds(state.filters.tags).filter((id) => knownTags.has(id));
+  state.filters.colors = [...new Set((state.filters.colors || []).map(normalizeCardColor))];
   if (state.report.projectIds) {
     const known = new Set(state.projects.map((project) => project.id));
     state.report.projectIds = state.report.projectIds.filter((projectId) => known.has(projectId));
@@ -264,16 +369,18 @@ async function hash(value) {
 
 async function seedTasks(user) {
   const now = Date.now();
+  const billing = await writeTag("billing");
+  const ops = await writeTag("ops");
   const seeds = [
-    ["Reconcile Q3 vendor receipts", "Finance ops", "high", "backlog", 2400, -6],
-    ["Map approval workflow", "Finance ops", "medium", "backlog", 1200, -5],
-    ["Implement billing summary", "Atlas rollout", "high", "progress", 4800, -4],
-    ["Review stakeholder brief", "Atlas rollout", "medium", "progress", 900, -3],
-    ["Close August retainers", "Client services", "low", "done", 3200, -8],
-    ["Publish migration notes", "Atlas rollout", "medium", "done", 1800, -7]
+    ["Reconcile Q3 vendor receipts", "Finance ops", "high", "backlog", 2400, -6, [billing?.id], "coral"],
+    ["Map approval workflow", "Finance ops", "medium", "backlog", 1200, -5, [ops?.id], "blue"],
+    ["Implement billing summary", "Atlas rollout", "high", "progress", 4800, -4, [billing?.id], "coral"],
+    ["Review stakeholder brief", "Atlas rollout", "medium", "progress", 900, -3, [ops?.id], "gold"],
+    ["Close August retainers", "Client services", "low", "done", 3200, -8, [billing?.id], "sage"],
+    ["Publish migration notes", "Atlas rollout", "medium", "done", 1800, -7, [], "none"]
   ];
   const cache = new Map();
-  for (const [title, projectName, priority, status, rate, days] of seeds) {
+  for (const [title, projectName, priority, status, rate, days, tagIds, color] of seeds) {
     if (!cache.has(projectName)) cache.set(projectName, await getOrCreateProject(projectName));
     const project = cache.get(projectName);
     const columns = (await all("columns")).filter((column) => column.projectId === project.id);
@@ -284,7 +391,8 @@ async function seedTasks(user) {
       priority, status, rate, ownerId: user.id, ownerName: user.name,
       description: "Seeded workspace task — edit or remove it at any time.",
       createdAt, completedAt: status === "done" ? new Date(now + (days + 2) * 86400000).toISOString() : null,
-      timestampOverridden: false, sortOrder: now + days
+      timestampOverridden: false, sortOrder: now + days,
+      tagIds: normalizeTagIds(tagIds), color: normalizeCardColor(color)
     });
   }
 }
@@ -330,8 +438,12 @@ function shell(content, { access = true } = {}) {
   const role = access ? (currentBoardRole() || "editor") : "none";
   const nav = access ? `<nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav>` : "";
   const mobile = access ? `<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav>` : "";
-  const structure = access && canEdit() ? `<button type="button" class="board-structure-toggle" id="edit-board" aria-pressed="${state.boardStructure ? "true" : "false"}" aria-label="${state.boardStructure ? "Stop editing board" : "Edit board"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.boardStructure ? "Editing board" : "Edit board"}</span></button>` : "";
-  return `<div class="app-shell ${role === "viewer" ? "is-viewer" : ""} ${state.boardStructure ? "is-structuring" : ""}" data-role="${role}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div>${nav}<div class="account-area">${structure}${accountChrome(access)}</div></header>${content}${mobile}</div>`;
+  const structure = access && canEdit()
+    ? state.view === "reports"
+      ? `<button type="button" class="board-structure-toggle" id="edit-report" aria-pressed="${state.reportEditing ? "true" : "false"}" aria-label="${state.reportEditing ? "Stop editing report" : "Edit report"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.reportEditing ? "Editing report" : "Edit report"}</span></button>`
+      : `<button type="button" class="board-structure-toggle" id="edit-board" aria-pressed="${state.boardStructure ? "true" : "false"}" aria-label="${state.boardStructure ? "Stop editing board" : "Edit board"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.boardStructure ? "Editing board" : "Edit board"}</span></button>`
+    : "";
+  return `<div class="app-shell ${role === "viewer" ? "is-viewer" : ""} ${state.boardStructure ? "is-structuring" : ""} ${state.reportEditing ? "is-editing-report" : ""}" data-role="${role}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div>${nav}<div class="account-area">${structure}${accountChrome(access)}</div></header>${content}${mobile}</div>`;
 }
 
 async function signOutUser() {
@@ -343,6 +455,8 @@ async function signOutUser() {
     state.view = "board";
     state.boardStructure = false;
     state.structureRestoreAll = false;
+    state.reportEditing = false;
+    state.reportFocusBlockId = null;
     state.suppressCardClick = false;
     render();
   }
@@ -380,16 +494,61 @@ function bindAccount() {
 }
 
 function render() {
+  if (flushReportEditors()) persistReportLayout();
   if (!state.user) return renderAuth();
   const access = canAccessBoard(state.user, state.members);
   root.innerHTML = shell(access ? (state.view === "board" ? boardView() : reportsView()) : waitingView(), { access });
   bindAccount();
   bindActionMenus();
   document.querySelector("#edit-board")?.addEventListener("click", () => setBoardStructure(!state.boardStructure));
+  document.querySelector("#edit-report")?.addEventListener("click", () => setReportEditing(!state.reportEditing));
   if (!access) return;
   document.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.view; render(); });
   document.querySelector("#open-people").onclick = () => openPeopleDialog();
   state.view === "board" ? bindBoard() : bindReports();
+}
+
+async function writeTag(rawName) {
+  const name = normalizeTagName(rawName);
+  if (!name) return null;
+  const existing = findTagByName(state.tags, name);
+  if (existing) return existing;
+  const tag = { id: uuid(), name, createdAt: new Date().toISOString() };
+  await put("tags", tag);
+  state.tags = [...state.tags, tag].sort((a, b) => a.name.localeCompare(b.name));
+  return tag;
+}
+
+async function createTag(rawName) {
+  if (!guardEdit()) return null;
+  return writeTag(rawName);
+}
+
+async function ensureTagIds(names = []) {
+  const ids = [];
+  for (const name of names) {
+    const tag = await writeTag(name);
+    if (tag) ids.push(tag.id);
+  }
+  return ids;
+}
+
+function visibleTasks() {
+  return filterTasks(state.tasks, { ...state.filters, tagCatalog: state.tags });
+}
+
+function tagsForTask(task) {
+  const ids = new Set(normalizeTagIds(task?.tagIds));
+  return state.tags.filter((tag) => ids.has(tag.id));
+}
+
+function clearBoardFilters() {
+  state.filters = emptyBoardFilters();
+  if (state.boardStructure) {
+    state.boardStructure = false;
+    state.structureRestoreAll = false;
+  }
+  render();
 }
 
 function visibleColumns() {
@@ -410,8 +569,48 @@ function actionMenu(id, label, items) {
   </div>`;
 }
 
+function facetBarMarkup(visibleCount) {
+  const edit = canEdit();
+  const active = boardFiltersActive(state.filters);
+  const selectedTags = new Set(normalizeTagIds(state.filters.tags));
+  const selectedColors = new Set((state.filters.colors || []).map(normalizeCardColor));
+  const tagChips = state.tags.length
+    ? state.tags.map((tag) => {
+      const on = selectedTags.has(tag.id);
+      return `<button type="button" class="facet-chip" data-filter-tag="${tag.id}" aria-pressed="${on ? "true" : "false"}">${escapeHtml(tag.name)}</button>`;
+    }).join("")
+    : `<span class="facet-empty">None yet</span>`;
+  const colorChips = CARD_COLORS.map((color) => {
+    const on = selectedColors.has(color.id);
+    return `<button type="button" class="color-swatch" data-filter-color="${color.id}" aria-pressed="${on ? "true" : "false"}" aria-label="Filter ${escapeHtml(color.label)}">
+      <span class="color-swatch-fill" data-color="${color.id}"></span>
+      <span>${escapeHtml(color.label)}</span>
+    </button>`;
+  }).join("");
+  const create = edit
+    ? `<form id="new-tag-form" class="new-tag-form">
+        <label class="visually-hidden" for="new-tag-name">New tag</label>
+        <input id="new-tag-name" maxlength="32" placeholder="New tag" autocomplete="off">
+        <button class="button" type="submit">Add tag</button>
+      </form>`
+    : "";
+  return `<section class="facet-bar" aria-label="Tag and color filters">
+    <div class="facet-row">
+      <span class="facet-label">Tags</span>
+      <div class="facet-chips" id="tag-filters">${tagChips}</div>
+      ${create}
+    </div>
+    <div class="facet-row">
+      <span class="facet-label">Color</span>
+      <div class="facet-chips" id="color-filters">${colorChips}</div>
+      ${active ? `<button type="button" class="button ghost" id="clear-filters">Clear filters</button>` : ""}
+    </div>
+    ${active ? `<p class="filter-status" id="filter-status">Showing ${visibleCount} of ${state.tasks.length} tasks</p>` : ""}
+  </section>`;
+}
+
 function boardView() {
-  const visible = filterTasks(state.tasks, state.filters);
+  const visible = visibleTasks();
   const columns = visibleColumns();
   const selectedCount = [...state.selection].filter((id) => visible.some((task) => task.id === id)).length;
   const scopedProject = state.projects.find((project) => project.id === state.filters.project);
@@ -450,6 +649,7 @@ function boardView() {
       <select class="select" id="project-filter"><option value="all">All projects</option>${state.projects.map((p) => `<option value="${p.id}" ${state.filters.project === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select>
       ${edit ? `<label class="toolbar-select check-line"><input type="checkbox" id="select-all" ${visible.length && selectedCount === visible.length ? "checked" : ""}> Select</label>` : ""}
     </section>
+    ${facetBarMarkup(visible.length)}
     ${edit ? `<section class="selection-bar" id="selection-bar" ${selectedCount ? "" : "hidden"} aria-label="Selected tasks">
       <span class="selection-count" id="selection-count">${selectedCount} selected</span>
       <button class="button" id="delete-selected" type="button" ${selectedCount ? "" : "disabled"}>Delete selected</button>
@@ -487,14 +687,20 @@ function addColumnMarkup() {
 
 function taskCard(task) {
   const selected = state.selection.has(task.id);
+  const color = normalizeCardColor(task.color);
+  const tags = tagsForTask(task);
   const clip = (task.attachmentCount || 0) > 0 ? `<span class="clip" title="Has attachments">▣</span>` : "";
-  return `<article class="task-card ${selected ? "is-selected" : ""}" ${canEdit() ? `draggable="true"` : ""} data-id="${task.id}" tabindex="0">
+  const tagRow = tags.length
+    ? `<div class="card-tags">${tags.map((tag) => `<button type="button" class="card-tag" data-card-tag="${tag.id}">${escapeHtml(tag.name)}</button>`).join("")}</div>`
+    : "";
+  return `<article class="task-card ${selected ? "is-selected" : ""}" ${canEdit() ? `draggable="true"` : ""} data-id="${task.id}" data-color="${color}" tabindex="0">
     <div class="card-top">
       ${canEdit() ? `<label class="task-check"><input type="checkbox" data-select="${task.id}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(task.title)}"></label>` : ""}
       <span class="tag ${task.priority}">${escapeHtml(task.priority)} priority</span>
     </div>
     <h3>${escapeHtml(task.title)}</h3>
     <p class="project">${escapeHtml(task.project)}</p>
+    ${tagRow}
     <footer class="card-meta">
       <span class="mini-avatar">${initials(task.ownerName)}</span>
       <span>${task.status === "done" ? "Done " : "Created "}${formatMoment(task.status === "done" ? task.completedAt : task.createdAt, { showDate: true })}${task.timestampOverridden ? " · ✎" : ""}${clip}</span>
@@ -533,6 +739,15 @@ function taskDialog() {
             <label class="chip-field"><span>Priority</span><select name="priority" ${lock}><option>low</option><option selected>medium</option><option>high</option></select></label>
             <label class="chip-field"><span>Owner</span><select name="ownerId" ${lock}>${memberUsers().map((u) => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join("")}</select></label>
           </div>
+          <div class="task-meta-block">
+            <span class="facet-label" id="task-tags-label">Tags</span>
+            <div id="task-tag-list" class="tag-option-list" role="group" aria-labelledby="task-tags-label"></div>
+            ${locked ? "" : `<div class="new-tag-row"><label class="visually-hidden" for="task-new-tag">New tag</label><input id="task-new-tag" maxlength="32" placeholder="New tag" autocomplete="off"><button class="button" type="button" id="add-task-tag">Add tag</button></div>`}
+          </div>
+          <fieldset class="color-picker" ${locked ? "disabled" : ""}>
+            <legend>Card color</legend>
+            <div class="color-picker-row" id="task-color-list"></div>
+          </fieldset>
         </details>
         <section class="attach-panel" id="attach-panel">
           <header class="attach-head">
@@ -587,6 +802,7 @@ function bindBoard() {
     card.onclick = () => { if (!state.suppressCardClick) openTask(card.dataset.id); };
     card.onkeydown = (event) => { if (event.key === "Enter") openTask(card.dataset.id); };
   });
+  bindFacetFilters();
   if (!canEdit()) {
     document.querySelector("#export-tasks").onclick = () => openNotionExport();
     bindTaskEditor(dialog, true);
@@ -602,7 +818,7 @@ function bindBoard() {
   document.querySelector("#delete-task").onclick = deleteOpenTask;
   document.querySelector("#task-new-project").onclick = () => openProjectPrompt({ fromTask: true });
   document.querySelector("#select-all").onchange = (event) => {
-    const visible = filterTasks(state.tasks, state.filters);
+    const visible = visibleTasks();
     if (event.target.checked) visible.forEach((task) => state.selection.add(task.id));
     else visible.forEach((task) => state.selection.delete(task.id));
     render();
@@ -644,7 +860,7 @@ function bindBoard() {
 }
 
 function syncSelectionChrome() {
-  const visible = filterTasks(state.tasks, state.filters);
+  const visible = visibleTasks();
   const selected = [...state.selection].filter((id) => visible.some((task) => task.id === id));
   const count = document.querySelector("#selection-count");
   const del = document.querySelector("#delete-selected");
@@ -748,7 +964,7 @@ async function moveTask(taskId, dropId, insertIndex) {
   const dest = resolveDropColumn(dropId, task);
   if (!dest) return;
   applyColumn(task, dest);
-  const visible = filterTasks(state.tasks, state.filters);
+  const visible = visibleTasks();
   const visual = sortTasks(visible.filter((item) => {
     if (item.id === taskId) return false;
     return dropId.startsWith("type:") ? item.status === columnTypeToStatus(dropId.slice(5)) : item.columnId === dest.id;
@@ -760,6 +976,73 @@ async function moveTask(taskId, dropId, insertIndex) {
   await Promise.all(reindexed.map((item) => put("tasks", item)));
   toast("Task moved");
   await refresh();
+}
+
+function bindFacetFilters() {
+  document.querySelectorAll("[data-filter-tag]").forEach((button) => {
+    button.onclick = () => {
+      state.filters.tags = toggleListValue(state.filters.tags, button.dataset.filterTag);
+      render();
+    };
+  });
+  document.querySelectorAll("[data-filter-color]").forEach((button) => {
+    button.onclick = () => {
+      state.filters.colors = toggleListValue(state.filters.colors, button.dataset.filterColor);
+      render();
+    };
+  });
+  document.querySelectorAll("[data-card-tag]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      state.filters.tags = toggleListValue(state.filters.tags, button.dataset.cardTag);
+      render();
+    };
+    button.onpointerdown = (event) => event.stopPropagation();
+  });
+  document.querySelector("#clear-filters")?.addEventListener("click", () => clearBoardFilters());
+  document.querySelector("#new-tag-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = document.querySelector("#new-tag-name");
+    const name = input?.value || "";
+    if (!normalizeTagName(name)) {
+      toast("Name the tag");
+      input?.focus();
+      return;
+    }
+    const existed = Boolean(findTagByName(state.tags, name));
+    const tag = await createTag(name);
+    if (!tag) return;
+    if (input) input.value = "";
+    toast(existed ? "Tag already exists" : "Tag created");
+    render();
+    document.querySelector("#new-tag-name")?.focus();
+  });
+}
+
+function selectedTaskTagIds() {
+  return [...document.querySelectorAll('#task-tag-list input[name="tagIds"]:checked')].map((input) => input.value);
+}
+
+function renderTaskTagList(selectedIds, locked = !canEdit()) {
+  const list = document.querySelector("#task-tag-list");
+  if (!list) return;
+  const selected = new Set(normalizeTagIds(selectedIds));
+  if (!state.tags.length) {
+    list.innerHTML = `<p class="hint" id="task-tag-empty">${locked ? "No tags on this board." : "No tags yet. Add one below."}</p>`;
+    return;
+  }
+  list.innerHTML = state.tags.map((tag) => `<label class="tag-option"><input type="checkbox" name="tagIds" value="${tag.id}" ${selected.has(tag.id) ? "checked" : ""} ${locked ? "disabled" : ""}> ${escapeHtml(tag.name)}</label>`).join("");
+}
+
+function renderTaskColorList(selected, locked = !canEdit()) {
+  const row = document.querySelector("#task-color-list");
+  if (!row) return;
+  const current = normalizeCardColor(selected);
+  row.innerHTML = CARD_COLORS.map((color) => `<label class="color-choice">
+    <input type="radio" name="color" value="${color.id}" ${current === color.id ? "checked" : ""} ${locked ? "disabled" : ""}>
+    <span class="color-swatch-fill" data-color="${color.id}"></span>
+    <span>${escapeHtml(color.label)}</span>
+  </label>`).join("");
 }
 
 function bindColumnEdits() {
@@ -951,6 +1234,29 @@ function bindTaskEditor(dialog, readOnly = false) {
     event.target.value = "";
   };
   document.querySelector("#record-screen").onclick = () => startRecording(form.elements.id.value || "draft");
+  document.querySelector("#add-task-tag").onclick = async () => {
+    const input = document.querySelector("#task-new-tag");
+    const name = input?.value || "";
+    if (!normalizeTagName(name)) {
+      toast("Name the tag");
+      input?.focus();
+      return;
+    }
+    const existed = Boolean(findTagByName(state.tags, name));
+    const tag = await createTag(name);
+    if (!tag) return;
+    if (input) input.value = "";
+    const selected = new Set(selectedTaskTagIds());
+    selected.add(tag.id);
+    renderTaskTagList([...selected], false);
+    toast(existed ? "Tag already exists" : "Tag added");
+    input?.focus();
+  };
+  document.querySelector("#task-new-tag")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    document.querySelector("#add-task-tag")?.click();
+  });
 }
 
 function closeTaskDialog() {
@@ -987,6 +1293,8 @@ async function openTask(id) {
     field("createdAt").value = localDateTime(task?.createdAt || new Date().toISOString());
     field("completedAt").value = localDateTime(task?.completedAt);
     field("rate").value = task?.rate || "";
+    renderTaskTagList(task?.tagIds, !canEdit());
+    renderTaskColorList(task?.color, !canEdit());
     const editor = document.querySelector("#task-description");
     const raw = task?.description || "";
     editor.innerHTML = /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : escapeHtml(raw);
@@ -1070,6 +1378,7 @@ async function saveTask(event) {
   const completedAt = data.get("completedAt") ? new Date(data.get("completedAt")).toISOString() : (column.type === "complete" ? (old?.completedAt || new Date().toISOString()) : null);
   const description = sanitizeHtml(document.querySelector("#task-description").innerHTML);
   const task = {
+    ...(old || {}),
     id: old?.id || uuid(),
     title: data.get("title").trim(),
     project: project.name,
@@ -1084,7 +1393,9 @@ async function saveTask(event) {
     createdAt,
     completedAt,
     timestampOverridden: old ? old.createdAt !== createdAt || old.completedAt !== completedAt || old.timestampOverridden : createdAt.slice(0, 16) !== new Date().toISOString().slice(0, 16),
-    sortOrder: old?.sortOrder ?? Date.now()
+    sortOrder: old?.sortOrder ?? Date.now(),
+    tagIds: normalizeTagIds(data.getAll("tagIds")),
+    color: normalizeCardColor(data.get("color"))
   };
   await put("tasks", task);
   await Promise.all(state.modalAttachments.map((item) => put("attachments", {
@@ -1103,7 +1414,7 @@ async function deleteOpenTask() {
 
 async function deleteAllVisible() {
   closeActionMenus();
-  const visible = filterTasks(state.tasks, state.filters);
+  const visible = visibleTasks();
   const project = state.projects.find((item) => item.id === state.filters.project);
   const scope = state.filters.project === "all" ? "in this workspace" : `in ${project?.name || "this project"}`;
   await deleteTasks(visible.map((task) => task.id), scope, "Delete all tasks?");
@@ -1131,6 +1442,58 @@ function includedProjectIds() {
   return state.report.projectIds;
 }
 
+function reportEditing() {
+  return Boolean(state.reportEditing && canEdit());
+}
+
+async function setReportEditing(on) {
+  if (on && !guardEdit()) return;
+  flushReportEditors();
+  if (!on) {
+    const layout = currentReportLayout();
+    layout.blocks = layout.blocks.filter((block) => reportBlockHasContent(block.html));
+  }
+  state.reportEditing = Boolean(on);
+  await persistReportLayout();
+  render();
+}
+
+function reportInsertRail(slot, afterId = "") {
+  const spec = REPORT_SLOTS.find((item) => item.id === slot);
+  const after = Boolean(afterId);
+  const label = after ? "Add note below" : `Add note ${spec?.label || ""}`.trim();
+  return `<button type="button" class="report-insert" data-report-slot="${slot}"${after ? ` data-after="${afterId}"` : ""} aria-label="${escapeHtml(label)}"><span aria-hidden="true">＋</span> ${after ? "Add below" : "Add note"}</button>`;
+}
+
+function reportNoteMarkup(block, editing) {
+  const html = prepareReportHtml(block.html);
+  if (!editing && !reportBlockHasContent(html)) return "";
+  if (!editing) {
+    return `<section class="report-note is-readonly" data-note-id="${block.id}">
+      <div class="report-note-body">${html}</div>
+    </section>`;
+  }
+  return `<section class="report-note is-editing" data-note-id="${block.id}">
+    <div class="report-note-tools">
+      <div class="rtf-toolbar" role="toolbar" aria-label="Note formatting">
+        <button type="button" data-cmd="bold" data-report-cmd="${block.id}" title="Bold"><strong>B</strong></button>
+        <button type="button" data-cmd="italic" data-report-cmd="${block.id}" title="Italic"><em>I</em></button>
+        <button type="button" data-cmd="underline" data-report-cmd="${block.id}" title="Underline"><u>U</u></button>
+        <button type="button" data-cmd="insertUnorderedList" data-report-cmd="${block.id}" title="Bulleted list">• List</button>
+        <button type="button" data-link="${block.id}" title="Link. Google Drive and Google Docs URLs work well.">Link</button>
+      </div>
+      <button type="button" class="icon-button report-note-remove" data-remove-note="${block.id}" aria-label="Remove note">×</button>
+    </div>
+    <div class="rtf-editor report-note-editor" id="report-note-${block.id}" contenteditable="true" role="textbox" aria-label="Report note" data-placeholder="Formatted notes, a pasted screenshot, or a Google Drive / Docs link…" data-report-block="${block.id}">${html}</div>
+    ${reportInsertRail(block.slot, block.id)}
+  </section>`;
+}
+
+function reportSlotMarkup(slot, editing) {
+  const notes = blocksForSlot(currentReportLayout().blocks, slot).map((block) => reportNoteMarkup(block, editing)).join("");
+  return `${notes}${editing ? reportInsertRail(slot) : ""}`;
+}
+
 function reportsView() {
   const labels = { invoice: ["Invoice settlement", "Completed work prepared for settlement."], project: ["Project manager", "Delivery detail, owners, and operational status."], stakeholder: ["Stakeholder pulse", "A concise outcome-oriented portfolio view."] };
   const [title, subtitle] = labels[state.report.type];
@@ -1139,6 +1502,10 @@ function reportsView() {
   const total = rows.reduce((sum, task) => sum + Number(task.rate || 0), 0);
   const projects = new Set(rows.map((task) => task.project)).size;
   const refineOpen = typeof matchMedia === "function" && matchMedia("(min-width: 801px)").matches;
+  const editing = reportEditing();
+  const table = rows.length
+    ? `<table><thead><tr><th>Work item</th><th>Owner</th>${state.report.showDate || state.report.showTime ? "<th>Reported</th>" : ""}<th>Result</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td>${state.report.showDate || state.report.showTime ? `<td>${formatMoment(task.completedAt || task.createdAt, state.report)}</td>` : ""}<td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">No work matches this report yet. ${selected.length ? "" : "Select at least one project."}</div>`;
   return `<main class="main">
     <header class="page-head page-head-work"><div><p class="eyebrow">Reports</p><h1 class="page-title">Proof</h1></div></header>
     <section class="report-layout">
@@ -1157,7 +1524,12 @@ function reportsView() {
           </div>
         </details>
       </aside>
-      <article class="report-sheet">
+      <article class="report-sheet ${editing ? "is-editing" : ""}" data-report-type="${state.report.type}">
+        ${editing ? `<div class="report-edit-bar">
+          <p class="hint">Add formatted notes, pasted pictures, or Google Drive / Docs links above, between, or below these sections. They stay on this lens after you leave edit mode.</p>
+          <button type="button" class="button" id="done-report-edit">Done</button>
+        </div>` : ""}
+        ${reportSlotMarkup("start", editing)}
         <header class="report-sheet-head">
           <div><p class="mono">LEDGERLANE / ${new Date().getFullYear()}</p><h2>${title}</h2><p>${subtitle}</p></div>
           <div class="report-actions">${actionMenu("report-share", "Share", [
@@ -1165,18 +1537,171 @@ function reportsView() {
             menuItem("print-report", "Print", "Open the print dialog for this sheet")
           ].join(""))}</div>
         </header>
+        ${reportSlotMarkup("after-head", editing)}
         <div class="stats">
           <div class="stat"><strong>${rows.length}</strong><small>Items shown</small></div>
           <div class="stat"><strong>${taskProgress(rows)}%</strong><small>Completion</small></div>
           <div class="stat"><strong>${state.report.type === "invoice" ? `$${total.toLocaleString()}` : projects}</strong><small>${state.report.type === "invoice" ? "Settlement" : "Projects"}</small></div>
         </div>
-        ${rows.length ? `<table><thead><tr><th>Work item</th><th>Owner</th>${state.report.showDate || state.report.showTime ? "<th>Reported</th>" : ""}<th>Result</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td>${state.report.showDate || state.report.showTime ? `<td>${formatMoment(task.completedAt || task.createdAt, state.report)}</td>` : ""}<td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No work matches this report yet. ${selected.length ? "" : "Select at least one project."}</div>`}
+        ${reportSlotMarkup("after-stats", editing)}
+        ${table}
+        ${reportSlotMarkup("after-table", editing)}
       </article>
     </section>
   </main>`;
 }
 
+function bindReportNoteEditor(editor) {
+  editor.oninput = () => {
+    captureReportEditor(editor);
+    scheduleReportSave();
+  };
+  editor.onpaste = async (event) => {
+    const image = [...(event.clipboardData?.items || [])].find((item) => item.type.startsWith("image/"));
+    if (image) {
+      event.preventDefault();
+      await insertReportImage(editor, image.getAsFile());
+      return;
+    }
+    const text = event.clipboardData?.getData("text/plain") || "";
+    const pastedHtml = event.clipboardData?.getData("text/html") || "";
+    const url = normalizeHttpUrl(text.trim());
+    if (!pastedHtml && url && /^https?:\/\//i.test(url)) {
+      event.preventDefault();
+      insertReportLinkAt(editor, url);
+    }
+  };
+  editor.ondragover = (event) => event.preventDefault();
+  editor.ondrop = async (event) => {
+    event.preventDefault();
+    const files = [...(event.dataTransfer?.files || [])].filter((file) => file.type.startsWith("image/"));
+    await Promise.all(files.map((file) => insertReportImage(editor, file)));
+  };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function insertReportImage(editor, file) {
+  if (!guardEdit() || !file) return;
+  if (!file.type.startsWith("image/")) return;
+  if (file.size > REPORT_IMAGE_MAX) return toast("Image is too large to embed in the report");
+  const dataUrl = await readFileAsDataUrl(file);
+  editor.focus();
+  document.execCommand("insertImage", false, dataUrl);
+  captureReportEditor(editor);
+  await persistReportLayout();
+}
+
+function insertReportLinkAt(editor, url, label) {
+  const href = normalizeHttpUrl(url);
+  if (!href) return toast("Enter a web link, such as a Google Drive or Docs URL");
+  editor.focus();
+  if (reportLinkContext.range && editor.contains(reportLinkContext.range.commonAncestorContainer)) {
+    const selection = document.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(reportLinkContext.range);
+  }
+  const selected = document.getSelection()?.toString().trim();
+  const text = selected || label || defaultLinkLabel(href);
+  if (selected) document.execCommand("createLink", false, href);
+  else document.execCommand("insertHTML", false, `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`);
+  editor.querySelectorAll("a[href]").forEach((anchor) => {
+    const kind = googleWorkspaceKind(anchor.href);
+    anchor.setAttribute("target", "_blank");
+    anchor.setAttribute("rel", "noopener noreferrer");
+    if (kind === "docs") anchor.classList.add("report-link-docs");
+    if (kind === "drive") anchor.classList.add("report-link-drive");
+  });
+  captureReportEditor(editor);
+  persistReportLayout();
+  toast(googleWorkspaceKind(href) === "docs" ? "Google Doc linked" : googleWorkspaceKind(href) === "drive" ? "Google Drive linked" : "Link added");
+}
+
+function rememberReportSelection(editor) {
+  const selection = document.getSelection();
+  if (selection?.rangeCount && editor.contains(selection.anchorNode)) {
+    reportLinkContext = { editor, range: selection.getRangeAt(0).cloneRange() };
+  } else {
+    reportLinkContext = { editor, range: null };
+  }
+}
+
+function openReportLinkDialog(editor) {
+  rememberReportSelection(editor);
+  const dialog = document.querySelector("#report-link-dialog");
+  const form = document.querySelector("#report-link-form");
+  form.reset();
+  const selected = reportLinkContext.range?.toString().trim() || "";
+  form.elements.label.value = selected;
+  dialog.showModal();
+  form.elements.url.focus();
+}
+
+function bindReportLinkDialog() {
+  const dialog = document.querySelector("#report-link-dialog");
+  const form = document.querySelector("#report-link-form");
+  if (!dialog || dialog.dataset.bound) return;
+  dialog.dataset.bound = "true";
+  document.querySelector("#close-report-link").onclick = document.querySelector("#cancel-report-link").onclick = () => dialog.close();
+  form.onsubmit = (event) => {
+    event.preventDefault();
+    const url = form.elements.url.value;
+    const label = form.elements.label.value.trim();
+    if (!normalizeHttpUrl(url)) {
+      toast("Enter a web link, such as a Google Drive or Docs URL");
+      return;
+    }
+    const editor = reportLinkContext.editor;
+    dialog.close();
+    if (editor) insertReportLinkAt(editor, url, label);
+  };
+}
+
+async function addReportBlock(slot, afterId = "") {
+  if (!guardEdit()) return;
+  if (!state.reportEditing) state.reportEditing = true;
+  flushReportEditors();
+  const layout = currentReportLayout();
+  const block = {
+    id: uuid(),
+    slot,
+    html: "",
+    order: nextReportBlockOrder(layout.blocks, slot, afterId || undefined)
+  };
+  layout.blocks = reindexReportBlocks([...layout.blocks, block]);
+  state.reportFocusBlockId = block.id;
+  await persistReportLayout();
+  render();
+}
+
+async function removeReportBlock(id) {
+  if (!guardEdit()) return;
+  flushReportEditors();
+  const layout = currentReportLayout();
+  const block = layout.blocks.find((item) => item.id === id);
+  if (!block) return;
+  if (reportBlockHasContent(block.html)) {
+    const ok = await askConfirm({
+      title: "Remove this note?",
+      message: "The formatted text, pictures, and links in this note will be deleted from the report.",
+      confirmLabel: "Remove note"
+    });
+    if (!ok) return;
+  }
+  layout.blocks = reindexReportBlocks(layout.blocks.filter((item) => item.id !== id));
+  await persistReportLayout();
+  render();
+}
+
 function bindReports() {
+  bindReportLinkDialog();
   document.querySelectorAll("[data-report]").forEach((button) => button.onclick = () => {
     state.report.type = button.dataset.report;
     if (button.dataset.report === "invoice") state.report.showTime = false;
@@ -1209,6 +1734,36 @@ function bindReports() {
     URL.revokeObjectURL(link.href);
     toast("Report downloaded");
   };
+  document.querySelector("#done-report-edit")?.addEventListener("click", () => setReportEditing(false));
+  document.querySelectorAll("[data-report-slot]").forEach((button) => {
+    button.onclick = () => addReportBlock(button.dataset.reportSlot, button.dataset.after || "");
+  });
+  document.querySelectorAll("[data-remove-note]").forEach((button) => {
+    button.onclick = () => removeReportBlock(button.dataset.removeNote);
+  });
+  document.querySelectorAll("[data-report-block]").forEach((editor) => bindReportNoteEditor(editor));
+  document.querySelectorAll("[data-report-cmd]").forEach((button) => {
+    button.onclick = (event) => {
+      event.preventDefault();
+      const editor = document.querySelector(`[data-report-block="${button.dataset.reportCmd}"]`);
+      editor?.focus();
+      document.execCommand(button.dataset.cmd, false);
+      if (editor) {
+        captureReportEditor(editor);
+        scheduleReportSave();
+      }
+    };
+  });
+  document.querySelectorAll("[data-link]").forEach((button) => {
+    button.onclick = (event) => {
+      event.preventDefault();
+      const editor = document.querySelector(`[data-report-block="${button.dataset.link}"]`);
+      if (editor) openReportLinkDialog(editor);
+    };
+  });
+  const focusId = state.reportFocusBlockId;
+  state.reportFocusBlockId = null;
+  if (focusId) document.querySelector(`[data-report-block="${focusId}"]`)?.focus();
 }
 
 async function startRecording(taskId) {
@@ -1407,6 +1962,7 @@ async function applyImport(parsed, mode) {
     const owner = matchOwner(draft.ownerName);
     const createdAt = draft.createdAt || new Date().toISOString();
     const completedAt = column.type === "complete" ? (draft.completedAt || new Date().toISOString()) : null;
+    const tagIds = await ensureTagIds(draft.tagNames || []);
     await put("tasks", {
       id: uuid(),
       title: draft.title,
@@ -1423,7 +1979,9 @@ async function applyImport(parsed, mode) {
       completedAt,
       timestampOverridden: Boolean(draft.timestampOverridden),
       sortOrder: Date.now() + created,
-      externalId: draft.externalId || ""
+      externalId: draft.externalId || "",
+      tagIds,
+      color: normalizeCardColor(draft.color)
     });
     created += 1;
   }
@@ -1472,15 +2030,15 @@ function exportClickUp() {
 
 function exportLedgerLane() {
   if (!guardEdit()) return;
-  const backup = buildLedgerLaneBackup({ projects: state.projects, columns: state.columns, tasks: state.tasks });
+  const backup = buildLedgerLaneBackup({ projects: state.projects, columns: state.columns, tasks: state.tasks, tags: state.tags });
   downloadBlob(`${stamp("ledgerlane-backup")}.json`, new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
   closeExportDialog();
   toast("LedgerLane backup downloaded");
 }
 
 function openNotionExport() {
-  const visible = filterTasks(state.tasks, state.filters);
-  const text = buildNotionMarkdown(visible, { projects: state.projects, columns: state.columns });
+  const visible = visibleTasks();
+  const text = buildNotionMarkdown(visible, { projects: state.projects, columns: state.columns, tags: state.tags });
   const area = document.querySelector("#notion-text");
   area.value = text;
   closeActionMenus();

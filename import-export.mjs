@@ -28,7 +28,8 @@ const HEADER_ALIASES = {
   createdAt: ["date created", "date created text", "created", "created at", "created date"],
   completedAt: ["due date", "due date text", "date closed", "date done", "date completed", "completed", "completed at"],
   externalId: ["task id", "id", "custom task id", "task custom id"],
-  rate: ["settlement", "rate", "amount", "settlement amount"]
+  rate: ["settlement", "rate", "amount", "settlement amount"],
+  tags: ["tags", "tag", "labels", "label"]
 };
 
 export function normalizeHeader(name = "") {
@@ -102,6 +103,13 @@ export function parseAssignees(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   return raw.replace(/^\[/, "").replace(/\]$/, "").split(",")[0].trim();
+}
+
+export function parseTagNames(value) {
+  if (Array.isArray(value)) return value.map((name) => String(name || "").trim()).filter(Boolean);
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  return raw.replace(/^\[/, "").replace(/\]$/, "").split(/[,;]/).map((name) => name.trim()).filter(Boolean);
 }
 
 export function parseClickUpPriority(value) {
@@ -185,7 +193,8 @@ function draftFromRow(row, indexMap) {
     createdAt: parseImportedDate(cell(row, indexMap.createdAt)),
     completedAt: parseImportedDate(cell(row, indexMap.completedAt)),
     rate: Number(cell(row, indexMap.rate)) || 0,
-    externalId: cell(row, indexMap.externalId)
+    externalId: cell(row, indexMap.externalId),
+    tagNames: parseTagNames(cell(row, indexMap.tags))
   };
 }
 
@@ -205,7 +214,9 @@ function draftsFromObjects(rows) {
         completedAt: parseImportedDate(item.completedAt),
         rate: Number(item.rate) || 0,
         externalId: item.externalId || item.id || "",
-        columnName: item.columnName || ""
+        columnName: item.columnName || "",
+        tagNames: parseTagNames(item.tagNames || item.tags),
+        color: item.color || "none"
       };
     }
     const keys = Object.keys(item);
@@ -220,6 +231,7 @@ export function parseImport(text, filename = "") {
   const trimmed = String(text || "").trim();
   if (format === "ledgerlane") {
     const data = JSON.parse(trimmed);
+    const tagNameById = new Map((data.tags || []).map((tag) => [tag.id, tag.name]));
     const tasks = (data.tasks || []).map((task) => ({
       title: task.title,
       description: task.description || "",
@@ -233,7 +245,11 @@ export function parseImport(text, filename = "") {
       rate: Number(task.rate) || 0,
       externalId: task.externalId || task.id || "",
       columnName: task.columnName || "",
-      columnType: task.columnType || statusToColumnType(task.status)
+      columnType: task.columnType || statusToColumnType(task.status),
+      tagNames: parseTagNames(task.tagNames).length
+        ? parseTagNames(task.tagNames)
+        : (task.tagIds || []).map((id) => tagNameById.get(id)).filter(Boolean),
+      color: task.color || "none"
     })).filter((task) => task.title);
     const projects = data.projects || [...new Set(tasks.map((task) => task.project))].map((name) => ({ name }));
     const columns = data.columns || [];
@@ -271,7 +287,8 @@ export function importPreview(parsed, existingCount, mode) {
   };
 }
 
-export function buildLedgerLaneBackup({ projects, columns, tasks }) {
+export function buildLedgerLaneBackup({ projects, columns, tasks, tags = [] }) {
+  const namesById = new Map(tags.map((tag) => [tag.id, tag.name]));
   return {
     format: "ledgerlane",
     version: 1,
@@ -280,6 +297,7 @@ export function buildLedgerLaneBackup({ projects, columns, tasks }) {
     columns: columns.map((column) => ({
       id: column.id, projectId: column.projectId, name: column.name, type: column.type, order: column.order
     })),
+    tags: tags.map((tag) => ({ id: tag.id, name: tag.name })),
     tasks: tasks.map((task) => ({
       title: task.title,
       project: task.project,
@@ -296,7 +314,9 @@ export function buildLedgerLaneBackup({ projects, columns, tasks }) {
       completedAt: task.completedAt,
       timestampOverridden: Boolean(task.timestampOverridden),
       sortOrder: task.sortOrder ?? 0,
-      externalId: task.externalId || ""
+      externalId: task.externalId || "",
+      color: task.color || "none",
+      tagNames: (task.tagIds || []).map((id) => namesById.get(id) || "").filter(Boolean)
     }))
   };
 }
@@ -343,8 +363,9 @@ function notionEscape(value = "") {
   return String(value).replace(/([\\`*_[\]#])/g, "\\$1");
 }
 
-export function buildNotionMarkdown(tasks = [], { projects = [], columns = [] } = {}) {
+export function buildNotionMarkdown(tasks = [], { projects = [], columns = [], tags = [] } = {}) {
   if (!tasks.length) return "# LedgerLane\n\nNo tasks to copy.\n";
+  const namesById = new Map(tags.map((tag) => [tag.id, tag.name]));
   const groups = new Map();
   for (const task of tasks) {
     const project = task.project || projects.find((item) => item.id === task.projectId)?.name || "Untitled";
@@ -375,7 +396,15 @@ export function buildNotionMarkdown(tasks = [], { projects = [], columns = [] } 
       lines.push(`### ${notionEscape(label)}`, "");
       for (const task of items) {
         lines.push(`- [${task.status === "done" ? "x" : " "}] **${notionEscape(task.title || "Untitled")}**`);
-        const meta = [task.priority ? `${task.priority} priority` : "", task.ownerName || ""].filter(Boolean).join(" · ");
+        const tagNames = (task.tagNames || []).length
+          ? task.tagNames
+          : (task.tagIds || []).map((id) => namesById.get(id)).filter(Boolean);
+        const meta = [
+          task.priority ? `${task.priority} priority` : "",
+          task.ownerName || "",
+          tagNames.length ? tagNames.join(", ") : "",
+          task.color && task.color !== "none" ? `${task.color} card` : ""
+        ].filter(Boolean).join(" · ");
         if (meta) lines.push(`  ${meta}`);
         const body = plainText(task.description);
         if (body) lines.push(`  ${body}`);

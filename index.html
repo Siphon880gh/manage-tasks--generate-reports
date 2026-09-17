@@ -191,6 +191,23 @@
       </footer>
     </form>
   </dialog>
+  <dialog id="report-link-dialog" class="confirm-dialog">
+    <form id="report-link-form">
+      <header class="modal-head">
+        <h2>Add a link</h2>
+        <button class="icon-button" type="button" id="close-report-link" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <p class="hint">Paste a Google Drive or Google Docs URL, or any web link. Shared Drive and Docs links are a good fit for evidence that lives outside this browser.</p>
+        <label class="field" for="report-link-url"><span>URL</span><input id="report-link-url" name="url" type="text" inputmode="url" required placeholder="https://docs.google.com/document/d/…"></label>
+        <label class="field" for="report-link-label"><span>Label (optional)</span><input id="report-link-label" name="label" placeholder="Google Doc"></label>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-report-link">Cancel</button>
+        <button class="button primary" type="submit">Add link</button>
+      </footer>
+    </form>
+  </dialog>
   <script type="module" src="app.mjs"></script>
 </body>
 </html>

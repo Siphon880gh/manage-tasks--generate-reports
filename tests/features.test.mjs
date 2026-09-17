@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   accountRole, applyDropOrder, availableColumnTypes, availableColumnTypesForEdit, canAddColumnType, canAssignRole, canDeleteColumn, canEdit, canEditBoard,
   canManagePeople, canRemoveMember, columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage, destinationAfterColumnDelete, filterByProjectIds, filterTasks,
-  invitableUsers, isAdmin, isViewer, naturalJoin, reportRows, roleCaption, seedMemberships, statusToColumnType
+  invitableUsers, isAdmin, isViewer, naturalJoin, nextReportBlockOrder, normalizeHttpUrl, normalizeReportBlocks,
+  reportBlockHasContent, reportRows, roleCaption, seedMemberships, statusToColumnType, blocksForSlot, defaultLinkLabel,
+  googleWorkspaceKind, reindexReportBlocks, emptyBoardFilters, boardFiltersActive, normalizeTagName, toggleListValue
 } from "../app-core.mjs";
 
 const tasks = [
@@ -109,4 +111,63 @@ test("natural join names people for waiting copy", () => {
   assert.equal(naturalJoin(["Morgan Lee"]), "Morgan Lee");
   assert.equal(naturalJoin(["Morgan Lee", "Admin User"]), "Morgan Lee or Admin User");
   assert.equal(naturalJoin(["A", "B", "C"]), "A, B, or C");
+});
+
+test("report notes stack between sections and keep insert order", () => {
+  const first = { id: "a", slot: "after-head", html: "<p>Hi</p>", order: nextReportBlockOrder([], "after-head") };
+  const stacked = normalizeReportBlocks([first]);
+  const second = { id: "b", slot: "after-head", html: "<p>There</p>", order: nextReportBlockOrder(stacked, "after-head", "a") };
+  const both = reindexReportBlocks([...stacked, second]);
+  assert.deepEqual(blocksForSlot(both, "after-head").map((block) => block.id), ["a", "b"]);
+  const between = { id: "c", slot: "after-head", html: "<p>Mid</p>", order: nextReportBlockOrder(both, "after-head", "a") };
+  assert.deepEqual(blocksForSlot(reindexReportBlocks([...both, between]), "after-head").map((block) => block.id), ["a", "c", "b"]);
+});
+
+test("empty report html is ignored unless it has media or a link", () => {
+  assert.equal(reportBlockHasContent("<p><br></p>"), false);
+  assert.equal(reportBlockHasContent('<p><img src="data:image/png;base64,xx" alt=""></p>'), true);
+  assert.equal(reportBlockHasContent('<p><a href="https://docs.google.com/document/d/x">Doc</a></p>'), true);
+});
+
+test("google Drive and Docs urls get a clear label", () => {
+  assert.equal(googleWorkspaceKind("https://docs.google.com/document/d/abc"), "docs");
+  assert.equal(googleWorkspaceKind("https://drive.google.com/file/d/abc/view"), "drive");
+  assert.equal(googleWorkspaceKind("https://example.com/file"), "");
+  assert.equal(defaultLinkLabel("https://docs.google.com/document/d/abc"), "Google Doc");
+  assert.equal(defaultLinkLabel("https://drive.google.com/file/d/abc/view"), "Google Drive");
+  assert.match(normalizeHttpUrl("docs.google.com/document/d/abc"), /^https:\/\/docs\.google\.com\/document\/d\/abc\/?$/);
+});
+
+const tagged = [
+  { id: "1", title: "A", tagIds: ["t1"], color: "coral" },
+  { id: "2", title: "B", tagIds: ["t2"], color: "blue" },
+  { id: "3", title: "C", tagIds: ["t1", "t2"], color: "coral" },
+  { id: "4", title: "D", tagIds: [], color: "none" }
+];
+
+test("tag filters match any selected tag", () => {
+  assert.deepEqual(filterTasks(tagged, { tags: ["t1"] }).map((task) => task.id), ["1", "3"]);
+  assert.deepEqual(filterTasks(tagged, { tags: ["t1", "t2"] }).map((task) => task.id), ["1", "2", "3"]);
+});
+
+test("color filters match selected card colors", () => {
+  assert.deepEqual(filterTasks(tagged, { colors: ["coral"] }).map((task) => task.id), ["1", "3"]);
+  assert.deepEqual(filterTasks(tagged, { colors: ["none"] }).map((task) => task.id), ["4"]);
+  assert.deepEqual(filterTasks(tagged, { colors: ["coral", "blue"] }).map((task) => task.id), ["1", "2", "3"]);
+});
+
+test("combined tag and color filters require both", () => {
+  assert.deepEqual(filterTasks(tagged, { tags: ["t1"], colors: ["coral"] }).map((task) => task.id), ["1", "3"]);
+  assert.deepEqual(filterTasks(tagged, { tags: ["t2"], colors: ["coral"] }).map((task) => task.id), ["3"]);
+  assert.equal(filterTasks(tagged, { tags: ["t2"], colors: ["sage"] }).length, 0);
+});
+
+test("clearing board filters resets every facet", () => {
+  assert.equal(boardFiltersActive({ query: "x", owner: "all", project: "all", tags: [], colors: [] }), true);
+  assert.equal(boardFiltersActive({ query: "", owner: "all", project: "all", tags: ["t1"], colors: [] }), true);
+  assert.equal(boardFiltersActive({ query: "", owner: "all", project: "all", tags: [], colors: ["coral"] }), true);
+  assert.equal(boardFiltersActive(emptyBoardFilters()), false);
+  assert.equal(normalizeTagName("  Billing  "), "Billing");
+  assert.deepEqual(toggleListValue(["t1"], "t2"), ["t1", "t2"]);
+  assert.deepEqual(toggleListValue(["t1", "t2"], "t1"), ["t2"]);
 });
