@@ -392,3 +392,5 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .new-tag-form{width:100%}
   .new-tag-form input{flex:1}
 }
+.invoice-task-panel{border:2px solid var(--ink);padding:16px;display:grid;gap:14px;background:#f7f5ec}.invoice-task-panel header h3{margin:2px 0}.invoice-compose-actions{display:flex;gap:8px;margin:0 0 12px}.invoice-title-input{font-weight:800;min-width:220px}.invoice-table input{width:100%;min-width:110px;border:1px solid var(--ink);padding:7px;background:var(--white)}.invoice-subline td:first-child{padding-left:34px;position:relative}.invoice-subline td:first-child:before{content:"↳";position:absolute;left:14px}.invoice-row-actions{display:grid;gap:6px;min-width:145px}.invoice-add-evidence{margin-top:8px;white-space:nowrap}.invoice-evidence li{display:flex;align-items:center;gap:5px}.invoice-remove-evidence{border:0;background:none;color:#8b1d13;font-size:18px;cursor:pointer}.invoice-compose-actions:empty{display:none}
+@media print{.invoice-compose-actions,.invoice-row-actions,.invoice-add-evidence,.invoice-remove-evidence,.report-edit-bar{display:none!important}}

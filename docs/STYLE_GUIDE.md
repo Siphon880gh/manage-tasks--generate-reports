@@ -311,3 +311,7 @@ Re-run `/critique` after a visual pass. The score should move above 28/40 before
 Drain implementation (16 Sep 2026 evening) is sequenced in [DRAIN_GRAPH.md](DRAIN_GRAPH.md). Loops 06–10 are the prompts.
 
 Drain implementation (16 Sep 2026 evening) is sequenced in [DRAIN_GRAPH.md](DRAIN_GRAPH.md). Loops 06–10 are the prompts.
+
+## Invoice settlement language
+
+Use **Invoice settlement** for the client-facing report lens. In compose mode, call named links on a deliverable **evidence** or **proof** and place them on that line; reserve **sheet note** for cover-letter commentary above or below the table. Board attachments remain working files and are not automatically invoice evidence.

@@ -303,9 +303,29 @@ export function filterByProjectIds(tasks, projectIds) {
 
 export function reportRows(tasks, type, options = {}) {
   const scoped = filterByProjectIds(tasks, options.projectIds);
-  if (type === "invoice") return scoped.filter((task) => task.status === "done").map((task) => ({ ...task, result: task.rate ? `$${Number(task.rate).toLocaleString()}` : "Ready" }));
+  if (type === "invoice") {
+    const included = scoped.filter((task) => task.invoiceIncluded !== false);
+    const ids = new Set(included.map((task) => task.id));
+    const children = new Map();
+    included.forEach((task) => {
+      const parent = task.invoiceParentId && ids.has(task.invoiceParentId) ? task.invoiceParentId : null;
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(task);
+    });
+    const flatten = (parent = null, depth = 0) => (children.get(parent) || []).flatMap((task) => {
+      const nested = task.id ? (children.get(task.id) || []) : [];
+      const hours = nested.length ? nested.reduce((sum, child) => sum + settlementHours(child), 0) : settlementHours(task);
+      const row = { ...task, invoiceDepth: depth, settlementHours: hours, result: task.rate ? `$${Number(task.rate).toLocaleString()}` : "Ready" };
+      return [row, ...(task.id ? flatten(task.id, depth + 1) : [])];
+    });
+    return flatten();
+  }
   if (type === "stakeholder") return scoped.map((task) => ({ ...task, result: task.status === "done" ? "Delivered" : task.status === "progress" ? "In flight" : "Planned" }));
   return scoped.map((task) => ({ ...task, result: task.status === "done" ? "Complete" : task.priority }));
+}
+
+export function invoiceTitle(task = {}) {
+  return String(task.invoiceTitle || task.title || "").trim();
 }
 
 export function settlementAssets(task = {}) {
