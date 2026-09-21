@@ -3,8 +3,9 @@ import {
   boardFiltersActive, boardRole, canAccessBoard, canAddColumnType, canAssignRole, canDeleteColumn, canEditBoard,
   canManagePeople, canRemoveMember, columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage,
   destinationAfterColumnDelete, blocksForSlot, defaultLinkLabel, emptyBoardFilters, emptyReportLayouts, filterTasks,
-  cardColorMeta, findTagByName, formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
-  normalizeBoardRole, normalizeCardColor, normalizeHttpUrl, normalizeReportBlocks, normalizeTagIds, normalizeTagName,
+  engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, findTagByName,
+  formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
+  normalizeBoardRole, cardColorMeta, normalizeCardColor, normalizeEngagementTerms, normalizeHttpUrl, normalizeReportBlocks, normalizeTagIds, normalizeTagName,
   plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, sortTasks,
   statusToColumnType, taskProgress, toCsv, toggleListValue
 } from "./app-core.mjs";
@@ -13,7 +14,7 @@ import {
 } from "./import-export.mjs";
 
 const DB_NAME = "ledgerlane-db";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const REPORT_IMAGE_MAX = 6 * 1024 * 1024;
 const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "P", "BR", "UL", "OL", "LI", "A", "IMG", "DIV", "SPAN", "H3"]);
 const state = {
@@ -22,6 +23,8 @@ const state = {
   members: [],
   tasks: [],
   projects: [],
+  engagements: [],
+  engagementTasks: [],
   columns: [],
   tags: [],
   view: "board",
@@ -40,7 +43,8 @@ const state = {
   cardMenuFocus: false,
   pendingImport: null,
   boardStructure: false,
-  structureRestoreAll: false
+  structureRestoreAll: false,
+  activeEngagementId: null
 };
 const root = document.querySelector("#app");
 
@@ -56,6 +60,8 @@ const dbPromise = new Promise((resolve, reject) => {
     if (!db.objectStoreNames.contains("members")) db.createObjectStore("members", { keyPath: "id" }).createIndex("userId", "userId", { unique: true });
     if (!db.objectStoreNames.contains("reportLayouts")) db.createObjectStore("reportLayouts", { keyPath: "id" });
     if (!db.objectStoreNames.contains("tags")) db.createObjectStore("tags", { keyPath: "id" });
+    if (!db.objectStoreNames.contains("engagements")) db.createObjectStore("engagements", { keyPath: "id" });
+    if (!db.objectStoreNames.contains("engagementTasks")) db.createObjectStore("engagementTasks", { keyPath: "id" }).createIndex("engagementId", "engagementId");
   };
   request.onsuccess = () => {
     const db = request.result;
@@ -87,6 +93,7 @@ const initials = (name = "") => name.split(/\s+/).map((p) => p[0]).filter(Boolea
 const localDateTime = (iso) => iso ? new Date(iso).toISOString().slice(0, 16) : "";
 const uuid = () => crypto.randomUUID();
 const bytesLabel = (size = 0) => size > 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`;
+const usd = (amount) => `$${Number(amount || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
 function sanitizeHtml(html) {
   const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
@@ -260,8 +267,8 @@ function applyColumn(task, column) {
   return task;
 }
 
-async function createProjectRecord(name) {
-  const project = { id: uuid(), name: name.trim(), createdAt: new Date().toISOString() };
+async function createProjectRecord(name, metadata = {}) {
+  const project = { id: uuid(), name: name.trim(), createdAt: new Date().toISOString(), ...metadata };
   await put("projects", project);
   await Promise.all(DEFAULT_COLUMNS.map((column, order) => put("columns", {
     id: uuid(), projectId: project.id, name: column.name, type: column.type, order
@@ -307,6 +314,8 @@ async function refresh() {
   state.members = await all("members");
   state.tasks = await all("tasks");
   state.projects = await all("projects");
+  state.engagements = await all("engagements");
+  state.engagementTasks = await all("engagementTasks");
   state.columns = await all("columns");
   state.tags = (await all("tags")).slice().sort((a, b) => a.name.localeCompare(b.name));
   await loadReportLayouts();
@@ -322,6 +331,9 @@ async function refresh() {
   if (state.report.projectIds) {
     const known = new Set(state.projects.map((project) => project.id));
     state.report.projectIds = state.report.projectIds.filter((projectId) => known.has(projectId));
+  }
+  if (state.activeEngagementId && !state.engagements.some((engagement) => engagement.id === state.activeEngagementId)) {
+    state.activeEngagementId = null;
   }
   const peopleOpen = document.querySelector("#people-dialog")?.open;
   render();
@@ -438,12 +450,12 @@ function accountChrome(access) {
 
 function shell(content, { access = true } = {}) {
   const role = access ? (currentBoardRole() || "editor") : "none";
-  const nav = access ? `<nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav>` : "";
-  const mobile = access ? `<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button></nav>` : "";
+  const nav = access ? `<nav class="main-nav"><button class="nav-btn ${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="nav-btn ${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button><button class="nav-btn ${state.view === "engagements" ? "active" : ""}" data-view="engagements">Engagements</button></nav>` : "";
+  const mobile = access ? `<nav class="mobile-nav"><button class="${state.view === "board" ? "active" : ""}" data-view="board">Board</button><button class="${state.view === "reports" ? "active" : ""}" data-view="reports">Reports</button><button class="${state.view === "engagements" ? "active" : ""}" data-view="engagements">Engagements</button></nav>` : "";
   const structure = access && canEdit()
     ? state.view === "reports"
       ? `<button type="button" class="board-structure-toggle" id="edit-report" aria-pressed="${state.reportEditing ? "true" : "false"}" aria-label="${state.reportEditing ? "Stop editing report" : "Edit report"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.reportEditing ? "Editing report" : "Edit report"}</span></button>`
-      : `<button type="button" class="board-structure-toggle" id="edit-board" aria-pressed="${state.boardStructure ? "true" : "false"}" aria-label="${state.boardStructure ? "Stop editing board" : "Edit board"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.boardStructure ? "Editing board" : "Edit board"}</span></button>`
+      : state.view === "board" ? `<button type="button" class="board-structure-toggle" id="edit-board" aria-pressed="${state.boardStructure ? "true" : "false"}" aria-label="${state.boardStructure ? "Stop editing board" : "Edit board"}"><span aria-hidden="true">✏</span><span class="board-structure-label">${state.boardStructure ? "Editing board" : "Edit board"}</span></button>` : ""
     : "";
   return `<div class="app-shell ${role === "viewer" ? "is-viewer" : ""} ${state.boardStructure ? "is-structuring" : ""} ${state.reportEditing ? "is-editing-report" : ""}" data-role="${role}"><header class="topbar"><div class="brand"><span class="brand-mark">LL</span> LEDGERLANE</div>${nav}<div class="account-area">${structure}${accountChrome(access)}</div></header>${content}${mobile}</div>`;
 }
@@ -499,7 +511,7 @@ function render() {
   if (flushReportEditors()) persistReportLayout();
   if (!state.user) return renderAuth();
   const access = canAccessBoard(state.user, state.members);
-  root.innerHTML = shell(access ? (state.view === "board" ? boardView() : reportsView()) : waitingView(), { access });
+  root.innerHTML = shell(access ? (state.view === "board" ? boardView() : state.view === "engagements" ? engagementsView() : reportsView()) : waitingView(), { access });
   bindAccount();
   bindActionMenus();
   document.querySelector("#edit-board")?.addEventListener("click", () => setBoardStructure(!state.boardStructure));
@@ -507,7 +519,9 @@ function render() {
   if (!access) return;
   document.querySelectorAll("[data-view]").forEach((button) => button.onclick = () => { state.view = button.dataset.view; render(); });
   document.querySelector("#open-people").onclick = () => openPeopleDialog();
-  state.view === "board" ? bindBoard() : bindReports();
+  if (state.view === "board") bindBoard();
+  else if (state.view === "engagements") bindEngagements();
+  else bindReports();
 }
 
 async function writeTag(rawName) {
@@ -678,6 +692,7 @@ function boardView() {
       <div><p class="eyebrow">Board</p><h1 class="page-title">Delivery</h1></div>
       <div class="page-actions">${edit ? `
         <button class="button acid" id="new-task" type="button">New task</button>
+        <button class="button" id="new-engagement" type="button">Follow-on engagement</button>
         ${actionMenu("board-menu", "More actions", [
           menuItem("import-tasks", "Import tasks", "Add work from ClickUp or a LedgerLane file"),
           menuItem("export-tasks", "Export…", "Copy for Notion, ClickUp CSV, or a LedgerLane backup"),
@@ -715,6 +730,292 @@ function boardView() {
     <section class="kanban">${columns.map((column) => columnMarkup(column, visible)).join("")}${structuring && scopedProject ? addColumnMarkup() : ""}</section>
     ${edit ? `<button class="button acid fab-new-task" id="fab-new-task" type="button">New task</button>` : ""}
   </main>${taskDialog()}`;
+}
+
+function engagementTasksFor(engagementId) {
+  return state.engagementTasks
+    .filter((task) => task.engagementId === engagementId)
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+}
+
+function activeEngagement() {
+  const ordered = state.engagements.slice().sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+  const selected = ordered.find((engagement) => engagement.id === state.activeEngagementId) || ordered[0] || null;
+  if (selected) state.activeEngagementId = selected.id;
+  return selected;
+}
+
+function engagementNote(engagement) {
+  const terms = normalizeEngagementTerms(engagement?.terms);
+  if (terms === "barter") return engagement?.exchangeNote || "Exchange details not set";
+  if (terms === "community-partnership") return engagement?.arrangementNote || "Advocacy arrangement not set";
+  return engagementCashAmount(engagement) ? `${usd(engagement.amount)} USD` : "Amount not set";
+}
+
+function engagementIndexMarkup(active) {
+  const list = state.engagements.slice().sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+  if (!list.length) return `<p class="hint">Your next piece of work will live here.</p>`;
+  return `<div class="engagement-index-list">${list.map((engagement) => `<button type="button" class="engagement-index-item ${engagement.id === active?.id ? "active" : ""}" data-select-engagement="${engagement.id}">
+      <strong>${escapeHtml(engagement.name)}</strong>
+      <span>${escapeHtml(engagementTermsLabel(engagement.terms))}${engagement.projectId ? " · Board saved" : " · Work list"}</span>
+    </button>`).join("")}</div>`;
+}
+
+function engagementTaskMarkup(task, editable) {
+  const timing = engagementWorkTimingLabel(task);
+  return `<li class="engagement-task-row" data-engagement-task="${task.id}">
+    <button type="button" class="engagement-task-copy" data-edit-engagement-task="${task.id}" ${editable ? "" : "disabled"}>
+      <strong>${escapeHtml(task.title)}</strong>
+      ${task.notes ? `<span>${escapeHtml(task.notes)}</span>` : ""}
+    </button>
+    ${timing !== "Undated" ? `<span class="engagement-timing">${escapeHtml(timing)}</span>` : ""}
+    ${editable ? `<button type="button" class="button ghost engagement-task-edit" data-edit-engagement-task="${task.id}">Edit</button>` : ""}
+  </li>`;
+}
+
+function engagementsView() {
+  const engagement = activeEngagement();
+  const edit = canEdit();
+  const saved = Boolean(engagement?.projectId);
+  const prior = state.projects.find((project) => project.id === engagement?.priorProjectId);
+  const tasks = engagement ? engagementTasksFor(engagement.id) : [];
+  const summary = engagement ? `<div class="engagement-summary" aria-label="Engagement terms">
+    <span class="engagement-term">${escapeHtml(engagementTermsLabel(engagement.terms))}</span>
+    <span>${escapeHtml(engagementNote(engagement))}</span>
+    ${prior ? `<span>Linked to prior work: <strong>${escapeHtml(prior.name)}</strong></span>` : ""}
+  </div>` : "";
+  const content = engagement ? `<section class="engagement-workspace">
+      <header class="engagement-head">
+        <div><p class="eyebrow">Follow-on engagement</p><h1 class="page-title">${escapeHtml(engagement.name)}</h1>${summary}</div>
+        <div class="engagement-actions">
+          ${actionMenu("engagement-share", "Print / export", [
+            menuItem("print-engagement", "Print / save as PDF", "Print this work list, or choose Save as PDF in the print dialog")
+          ])}
+          ${saved
+            ? `<span class="engagement-saved">Project board saved</span><button class="button acid" type="button" id="open-engagement-board">Open project board</button>`
+            : edit ? `<button class="button acid" type="button" id="save-engagement-board">Save as project board</button>` : ""}
+        </div>
+      </header>
+      ${saved ? `<p class="engagement-board-note">This work list is now linked to its project board. Keep day-to-day task changes on the board; the engagement keeps the original terms.</p>` : ""}
+      <section class="engagement-list-section" aria-label="Engagement work list">
+        <div class="engagement-list-heading"><h2>Work list</h2><span>${tasks.length} item${tasks.length === 1 ? "" : "s"}</span></div>
+        <ol class="engagement-task-list" id="engagement-task-list">${tasks.length ? tasks.map((task) => engagementTaskMarkup(task, edit && !saved)).join("") : `<li class="engagement-list-empty">No tasks yet. Capture the next step below.</li>`}</ol>
+        ${edit && !saved ? `<form id="quick-engagement-task" class="quick-engagement-task">
+          <label class="visually-hidden" for="quick-engagement-task-title">Add a task</label>
+          <div class="quick-engagement-row"><input id="quick-engagement-task-title" name="title" required maxlength="140" autocomplete="off" placeholder="Add a task — press Enter to keep stacking"><button class="button" type="submit">Add task</button></div>
+          <details class="quick-engagement-details" id="quick-engagement-details">
+            <summary>Add notes or timing</summary>
+            <div class="quick-engagement-fields">
+              <label class="field"><span>Notes (optional)</span><textarea name="notes" placeholder="A little context, if it helps"></textarea></label>
+              <label class="field"><span>When</span><select name="timing" id="quick-engagement-timing"><option value="undated">Undated</option><option value="date">Specific date</option><option value="ongoing">Ongoing</option></select></label>
+              <label class="field" id="quick-engagement-date-field" hidden><span>Date</span><input name="dueDate" type="date"></label>
+            </div>
+          </details>
+        </form>` : ""}
+      </section>
+    </section>` : `<section class="engagement-empty">
+      <p class="eyebrow">Follow-on engagements</p><h1 class="page-title">Capture the next stretch of work.</h1>
+      <p class="hint">Start a simple work list for a relationship that already exists. It stays out of the board until you choose to save it as one.</p>
+      ${edit ? `<button class="button acid" type="button" id="start-engagement">New follow-on engagement</button>` : ""}
+    </section>`;
+  return `<main class="main engagements-page">
+    <header class="page-head page-head-work engagement-page-head"><div><p class="eyebrow">Engagements</p><h1 class="page-title">Follow-on work</h1></div>${edit ? `<button class="button" type="button" id="new-engagement">New engagement</button>` : ""}</header>
+    <div class="engagement-layout"><aside class="engagement-index"><p class="eyebrow">Work lists</p>${engagementIndexMarkup(engagement)}</aside>${content}</div>
+  </main>`;
+}
+
+function syncEngagementTermFields(form = document.querySelector("#engagement-form")) {
+  if (!form) return;
+  const terms = normalizeEngagementTerms(form.elements.terms?.value);
+  const exchange = document.querySelector("#engagement-exchange-field");
+  const arrangement = document.querySelector("#engagement-arrangement-field");
+  const cashOverride = document.querySelector("#engagement-cash-override");
+  const amountField = document.querySelector("#engagement-amount-field");
+  const amountLabel = document.querySelector("#engagement-amount-field label");
+  const amountHint = document.querySelector("#engagement-amount-hint");
+  const nonCash = ["barter", "community-partnership"].includes(terms);
+  const showCashOverride = nonCash;
+  const showAmount = !nonCash || Boolean(form.elements.cashOverride?.checked);
+  if (exchange) exchange.hidden = terms !== "barter";
+  if (arrangement) arrangement.hidden = terms !== "community-partnership";
+  if (cashOverride) cashOverride.hidden = !showCashOverride;
+  if (amountField) amountField.hidden = !showAmount;
+  if (nonCash && !showAmount && form.elements.amount) form.elements.amount.value = "";
+  if (amountLabel) amountLabel.textContent = nonCash ? "Cash amount (USD, optional)" : "Amount (USD, optional)";
+  if (amountHint) amountHint.textContent = nonCash
+    ? "Non-cash by default. Only set a cash amount when this arrangement truly has one."
+    : "Optional for one-time or retainer work.";
+}
+
+function fillEngagementPriorProjects(selectedId = "") {
+  const select = document.querySelector("#engagement-prior-project");
+  if (!select) return;
+  select.innerHTML = `<option value="">No linked prior project</option>${state.projects.map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`).join("")}`;
+  select.value = state.projects.some((project) => project.id === selectedId) ? selectedId : "";
+}
+
+function openEngagementDialog({ priorProjectId = "" } = {}) {
+  if (!guardEdit()) return;
+  const dialog = document.querySelector("#engagement-dialog");
+  const form = document.querySelector("#engagement-form");
+  form.reset();
+  document.querySelector("#engagement-advanced").open = false;
+  fillEngagementPriorProjects(priorProjectId);
+  syncEngagementTermFields(form);
+  document.querySelector("#close-engagement").onclick = document.querySelector("#cancel-engagement").onclick = () => dialog.close();
+  form.onchange = (event) => { if (event.target.name === "terms" || event.target.name === "cashOverride") syncEngagementTermFields(form); };
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const name = String(data.get("name") || "").trim();
+    const terms = normalizeEngagementTerms(data.get("terms"));
+    if (!name || !terms) return;
+    const rawAmount = String(data.get("amount") || "").trim();
+    const amount = rawAmount === "" ? null : Math.max(0, Number(rawAmount) || 0);
+    const engagement = {
+      id: uuid(), name, terms, amount,
+      exchangeNote: String(data.get("exchangeNote") || "").trim(),
+      arrangementNote: String(data.get("arrangementNote") || "").trim(),
+      priorProjectId: String(data.get("priorProjectId") || ""),
+      projectId: null, createdAt: new Date().toISOString()
+    };
+    await put("engagements", engagement);
+    state.activeEngagementId = engagement.id;
+    state.view = "engagements";
+    dialog.close();
+    toast("Follow-on engagement created");
+    await refresh();
+  };
+  dialog.showModal();
+  form.elements.name.focus();
+}
+
+function syncEngagementTaskDate(form = document.querySelector("#engagement-task-form"), field = document.querySelector("#engagement-task-date-field")) {
+  if (field) field.hidden = form?.elements.timing?.value !== "date";
+}
+
+function openEngagementTaskDialog(id) {
+  if (!guardEdit()) return;
+  const engagement = activeEngagement();
+  if (!engagement || engagement.projectId) return;
+  const task = state.engagementTasks.find((item) => item.id === id && item.engagementId === engagement.id);
+  if (!task) return;
+  const dialog = document.querySelector("#engagement-task-dialog");
+  const form = document.querySelector("#engagement-task-form");
+  form.reset();
+  form.elements.id.value = task.id;
+  form.elements.title.value = task.title;
+  form.elements.notes.value = task.notes || "";
+  form.elements.timing.value = task.timing || "undated";
+  form.elements.dueDate.value = task.dueDate || "";
+  syncEngagementTaskDate(form);
+  document.querySelector("#delete-engagement-task").hidden = false;
+  document.querySelector("#close-engagement-task").onclick = document.querySelector("#cancel-engagement-task").onclick = () => dialog.close();
+  document.querySelector("#engagement-task-timing").onchange = () => syncEngagementTaskDate(form);
+  document.querySelector("#delete-engagement-task").onclick = async () => {
+    const ok = await askConfirm({ title: "Delete task?", message: `Delete ${task.title} from this work list?`, confirmLabel: "Delete task" });
+    if (!ok) return;
+    await remove("engagementTasks", task.id);
+    dialog.close();
+    toast("Task deleted");
+    await refresh();
+  };
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const timing = String(data.get("timing") || "undated");
+    const next = { ...task, title: String(data.get("title") || "").trim(), notes: String(data.get("notes") || "").trim(), timing, dueDate: timing === "date" ? String(data.get("dueDate") || "") : "" };
+    if (!next.title) return;
+    await put("engagementTasks", next);
+    dialog.close();
+    toast("Task saved");
+    await refresh();
+  };
+  dialog.showModal();
+  form.elements.title.focus();
+}
+
+async function addQuickEngagementTask(event) {
+  event.preventDefault();
+  if (!guardEdit()) return;
+  const engagement = activeEngagement();
+  if (!engagement || engagement.projectId) return;
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const title = String(data.get("title") || "").trim();
+  if (!title) return;
+  const timing = String(data.get("timing") || "undated");
+  await put("engagementTasks", {
+    id: uuid(), engagementId: engagement.id, title,
+    notes: String(data.get("notes") || "").trim(), timing,
+    dueDate: timing === "date" ? String(data.get("dueDate") || "") : "",
+    status: "backlog", sortOrder: Date.now(), createdAt: new Date().toISOString()
+  });
+  form.reset();
+  document.querySelector("#quick-engagement-date-field").hidden = true;
+  toast("Task added");
+  await refresh();
+  document.querySelector("#quick-engagement-task-title")?.focus();
+}
+
+async function saveEngagementAsProjectBoard() {
+  if (!guardEdit()) return;
+  const engagement = activeEngagement();
+  if (!engagement) return;
+  if (engagement.projectId) return openEngagementBoard();
+  const project = await createProjectRecord(engagement.name, { engagementId: engagement.id, priorProjectId: engagement.priorProjectId || null });
+  const projectColumns = (await all("columns")).filter((column) => column.projectId === project.id);
+  const todo = projectColumns.find((column) => column.type === "todo");
+  const list = engagementTasksFor(engagement.id);
+  await Promise.all(list.map((item, index) => {
+    const column = projectColumns.find((candidate) => candidate.type === statusToColumnType(item.status)) || todo;
+    return put("tasks", {
+      id: uuid(), title: item.title, project: project.name, projectId: project.id, columnId: column.id,
+      ownerId: state.user.id, ownerName: state.user.name, status: columnTypeToStatus(column.type), priority: "medium",
+      description: item.notes || "", rate: 0, createdAt: item.createdAt || new Date().toISOString(),
+      completedAt: column.type === "complete" ? new Date().toISOString() : null,
+      timestampOverridden: false, sortOrder: index, tagIds: [], color: "none",
+      engagementId: engagement.id, engagementTaskId: item.id, engagementTiming: item.timing || "undated", engagementDueDate: item.dueDate || ""
+    });
+  }));
+  await put("engagements", { ...engagement, projectId: project.id, savedAt: new Date().toISOString() });
+  state.filters.project = project.id;
+  state.view = "board";
+  toast("Saved as project board");
+  await refresh();
+}
+
+function openEngagementBoard() {
+  const engagement = activeEngagement();
+  if (!engagement?.projectId) return;
+  state.filters.project = engagement.projectId;
+  state.view = "board";
+  render();
+}
+
+function printEngagement() {
+  if (!activeEngagement()) return;
+  closeActionMenus();
+  print();
+}
+
+function bindEngagements() {
+  document.querySelector("#new-engagement")?.addEventListener("click", () => openEngagementDialog());
+  document.querySelector("#start-engagement")?.addEventListener("click", () => openEngagementDialog());
+  document.querySelectorAll("[data-select-engagement]").forEach((button) => {
+    button.onclick = () => { state.activeEngagementId = button.dataset.selectEngagement; render(); };
+  });
+  document.querySelector("#quick-engagement-task")?.addEventListener("submit", addQuickEngagementTask);
+  document.querySelector("#quick-engagement-timing")?.addEventListener("change", (event) => {
+    document.querySelector("#quick-engagement-date-field").hidden = event.target.value !== "date";
+  });
+  document.querySelectorAll("[data-edit-engagement-task]").forEach((button) => {
+    button.onclick = () => openEngagementTaskDialog(button.dataset.editEngagementTask);
+  });
+  document.querySelector("#save-engagement-board")?.addEventListener("click", saveEngagementAsProjectBoard);
+  document.querySelector("#open-engagement-board")?.addEventListener("click", openEngagementBoard);
+  document.querySelector("#print-engagement")?.addEventListener("click", printEngagement);
 }
 
 function columnMarkup(column, visible) {
@@ -909,6 +1210,9 @@ function bindBoard() {
   }
   bindCardMarking();
   document.querySelectorAll("#new-task, #fab-new-task").forEach((button) => { button.onclick = () => openTask(); });
+  document.querySelector("#new-engagement").onclick = () => openEngagementDialog({
+    priorProjectId: state.filters.project !== "all" ? state.filters.project : ""
+  });
   document.querySelector("#new-project")?.addEventListener("click", () => openProjectPrompt({ switchFilter: true }));
   document.querySelector("#done-structure")?.addEventListener("click", () => setBoardStructure(false));
   document.querySelector("#import-tasks").onclick = () => openImportDialog();
@@ -1653,12 +1957,54 @@ function reportSlotMarkup(slot, editing) {
   return `${notes}${editing ? reportInsertRail(slot) : ""}`;
 }
 
+function reportEngagements(projectIds = []) {
+  const included = new Set(projectIds);
+  return state.engagements.filter((engagement) => engagement.projectId && included.has(engagement.projectId));
+}
+
+function invoiceSettlementState(rows, engagements) {
+  const cashEngagements = engagements.filter(engagementIsCashSettlement);
+  const cashProjectIds = new Set(cashEngagements.map((engagement) => engagement.projectId));
+  const nonCashProjectIds = new Set(engagements
+    .filter((engagement) => ["barter", "community-partnership"].includes(normalizeEngagementTerms(engagement.terms)) && !engagementIsCashSettlement(engagement))
+    .map((engagement) => engagement.projectId));
+  const settledProjectIds = new Set([...cashProjectIds, ...nonCashProjectIds]);
+  const taskTotal = rows
+    .filter((task) => !settledProjectIds.has(task.projectId))
+    .reduce((sum, task) => sum + Number(task.rate || 0), 0);
+  const engagementTotal = cashEngagements.reduce((sum, engagement) => sum + engagementCashAmount(engagement), 0);
+  const nonCashOnly = engagements.length > 0 && cashEngagements.length === 0 && taskTotal === 0;
+  return { total: taskTotal + engagementTotal, taskTotal, engagementTotal, cashEngagements, nonCashOnly };
+}
+
+function invoiceEngagementMarkup(engagements) {
+  if (!engagements.length) return "";
+  return `<section class="invoice-engagements" aria-label="Engagement settlement terms">
+    <h3>Engagement terms</h3>
+    <div>${engagements.map((engagement) => {
+      const cash = engagementIsCashSettlement(engagement);
+      const detail = cash ? `${usd(engagement.amount)} USD`
+        : normalizeEngagementTerms(engagement.terms) === "barter" ? (engagement.exchangeNote || "Barter exchange not set")
+          : normalizeEngagementTerms(engagement.terms) === "community-partnership" ? (engagement.arrangementNote || "Advocacy arrangement not set")
+            : "Amount not set";
+      return `<article class="invoice-engagement-row ${cash ? "is-cash" : "is-noncash"}"><div><strong>${escapeHtml(engagement.name)}</strong><span>${escapeHtml(engagementTermsLabel(engagement.terms))}</span></div><p>${escapeHtml(detail)}</p></article>`;
+    }).join("")}</div>
+  </section>`;
+}
+
 function reportsView() {
-  const labels = { invoice: ["Invoice settlement", "Completed work prepared for settlement."], project: ["Project manager", "Delivery detail, owners, and operational status."], stakeholder: ["Stakeholder pulse", "A concise outcome-oriented portfolio view."] };
-  const [title, subtitle] = labels[state.report.type];
   const selected = includedProjectIds();
   const rows = reportRows(state.tasks, state.report.type, { projectIds: selected });
-  const total = rows.reduce((sum, task) => sum + Number(task.rate || 0), 0);
+  const engagements = reportEngagements(selected);
+  const settlement = invoiceSettlementState(rows, engagements);
+  const labels = {
+    invoice: settlement.nonCashOnly
+      ? ["Settlement record", "Non-cash arrangements recorded without a cash invoice."]
+      : ["Invoice settlement", "Completed work prepared for settlement."],
+    project: ["Project manager", "Delivery detail, owners, and operational status."],
+    stakeholder: ["Stakeholder pulse", "A concise outcome-oriented portfolio view."]
+  };
+  const [title, subtitle] = labels[state.report.type];
   const projects = new Set(rows.map((task) => task.project)).size;
   const refineOpen = typeof matchMedia === "function" && matchMedia("(min-width: 801px)").matches;
   const editing = reportEditing();
@@ -1700,9 +2046,10 @@ function reportsView() {
         <div class="stats">
           <div class="stat"><strong>${rows.length}</strong><small>Items shown</small></div>
           <div class="stat"><strong>${taskProgress(rows)}%</strong><small>Completion</small></div>
-          <div class="stat"><strong>${state.report.type === "invoice" ? `$${total.toLocaleString()}` : projects}</strong><small>${state.report.type === "invoice" ? "Settlement" : "Projects"}</small></div>
+          <div class="stat"><strong>${state.report.type === "invoice" ? settlement.nonCashOnly ? "Non-cash" : usd(settlement.total) : projects}</strong><small>${state.report.type === "invoice" ? "Settlement" : "Projects"}</small></div>
         </div>
         ${reportSlotMarkup("after-stats", editing)}
+        ${state.report.type === "invoice" ? invoiceEngagementMarkup(engagements) : ""}
         ${table}
         ${reportSlotMarkup("after-table", editing)}
       </article>
@@ -2113,8 +2460,19 @@ async function wipeAllTasks() {
 async function applyImport(parsed, mode) {
   if (mode === "replace") await wipeAllTasks();
   let created = 0;
+  const projectIdMap = new Map();
+  const importedProjects = new Map();
+  for (const source of parsed.projects || []) {
+    if (!source?.name) continue;
+    const project = await getOrCreateProject(source.name);
+    if (source.id) {
+      projectIdMap.set(source.id, project.id);
+      importedProjects.set(source.id, project);
+    }
+  }
   for (const draft of parsed.tasks) {
-    const project = await getOrCreateProject(draft.project || "Imported");
+    const project = importedProjects.get(draft.sourceProjectId) || await getOrCreateProject(draft.project || "Imported");
+    if (draft.sourceProjectId) projectIdMap.set(draft.sourceProjectId, project.id);
     state.projects = await all("projects");
     state.columns = await all("columns");
     const column = await ensureImportColumn(project, draft);
@@ -2143,6 +2501,26 @@ async function applyImport(parsed, mode) {
       color: normalizeCardColor(draft.color)
     });
     created += 1;
+  }
+  const engagementIdMap = new Map();
+  for (const source of parsed.engagements || []) {
+    const engagement = {
+      id: uuid(), name: source.name, terms: normalizeEngagementTerms(source.terms) || "one-time", amount: source.amount,
+      exchangeNote: source.exchangeNote || "", arrangementNote: source.arrangementNote || "",
+      priorProjectId: projectIdMap.get(source.priorProjectId) || "", projectId: projectIdMap.get(source.projectId) || null,
+      createdAt: source.createdAt || new Date().toISOString(), savedAt: source.savedAt || ""
+    };
+    await put("engagements", engagement);
+    if (source.sourceId) engagementIdMap.set(source.sourceId, engagement.id);
+  }
+  for (const source of parsed.engagementTasks || []) {
+    const engagementId = engagementIdMap.get(source.sourceEngagementId);
+    if (!engagementId) continue;
+    await put("engagementTasks", {
+      id: uuid(), engagementId, title: source.title, notes: source.notes || "", timing: source.timing || "undated",
+      dueDate: source.dueDate || "", status: source.status || "backlog", sortOrder: source.sortOrder ?? Date.now(),
+      createdAt: source.createdAt || new Date().toISOString()
+    });
   }
   return created;
 }
@@ -2189,7 +2567,10 @@ function exportClickUp() {
 
 function exportLedgerLane() {
   if (!guardEdit()) return;
-  const backup = buildLedgerLaneBackup({ projects: state.projects, columns: state.columns, tasks: state.tasks, tags: state.tags });
+  const backup = buildLedgerLaneBackup({
+    projects: state.projects, columns: state.columns, tasks: state.tasks, tags: state.tags,
+    engagements: state.engagements, engagementTasks: state.engagementTasks
+  });
   downloadBlob(`${stamp("ledgerlane-backup")}.json`, new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
   closeExportDialog();
   toast("LedgerLane backup downloaded");

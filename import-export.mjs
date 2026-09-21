@@ -243,6 +243,7 @@ export function parseImport(text, filename = "") {
       createdAt: task.createdAt || null,
       completedAt: task.completedAt || null,
       rate: Number(task.rate) || 0,
+      sourceProjectId: task.projectId || "",
       externalId: task.externalId || task.id || "",
       columnName: task.columnName || "",
       columnType: task.columnType || statusToColumnType(task.status),
@@ -253,7 +254,19 @@ export function parseImport(text, filename = "") {
     })).filter((task) => task.title);
     const projects = data.projects || [...new Set(tasks.map((task) => task.project))].map((name) => ({ name }));
     const columns = data.columns || [];
-    return { format, tasks, projects, columns, label: "LedgerLane backup" };
+    const engagements = (data.engagements || []).filter((engagement) => engagement && engagement.name).map((engagement) => ({
+      sourceId: engagement.id || "", name: String(engagement.name), terms: String(engagement.terms || ""),
+      amount: engagement.amount == null || engagement.amount === "" ? null : Number(engagement.amount) || 0,
+      exchangeNote: String(engagement.exchangeNote || ""), arrangementNote: String(engagement.arrangementNote || ""),
+      priorProjectId: String(engagement.priorProjectId || ""), projectId: String(engagement.projectId || ""),
+      createdAt: engagement.createdAt || "", savedAt: engagement.savedAt || ""
+    }));
+    const engagementTasks = (data.engagementTasks || []).filter((task) => task && task.title).map((task) => ({
+      sourceId: task.id || "", sourceEngagementId: task.engagementId || "", title: String(task.title),
+      notes: String(task.notes || ""), timing: String(task.timing || "undated"), dueDate: String(task.dueDate || ""),
+      status: String(task.status || "backlog"), sortOrder: Number(task.sortOrder) || 0, createdAt: task.createdAt || ""
+    }));
+    return { format, tasks, projects, columns, engagements, engagementTasks, label: "LedgerLane backup" };
   }
   if (format === "clickup-json") {
     const data = JSON.parse(trimmed);
@@ -287,11 +300,11 @@ export function importPreview(parsed, existingCount, mode) {
   };
 }
 
-export function buildLedgerLaneBackup({ projects, columns, tasks, tags = [] }) {
+export function buildLedgerLaneBackup({ projects, columns, tasks, tags = [], engagements = [], engagementTasks = [] }) {
   const namesById = new Map(tags.map((tag) => [tag.id, tag.name]));
   return {
     format: "ledgerlane",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     projects: projects.map((project) => ({ id: project.id, name: project.name })),
     columns: columns.map((column) => ({
@@ -317,6 +330,17 @@ export function buildLedgerLaneBackup({ projects, columns, tasks, tags = [] }) {
       externalId: task.externalId || "",
       color: task.color || "none",
       tagNames: (task.tagIds || []).map((id) => namesById.get(id) || "").filter(Boolean)
+    })),
+    engagements: engagements.map((engagement) => ({
+      id: engagement.id, name: engagement.name, terms: engagement.terms, amount: engagement.amount ?? null,
+      exchangeNote: engagement.exchangeNote || "", arrangementNote: engagement.arrangementNote || "",
+      priorProjectId: engagement.priorProjectId || "", projectId: engagement.projectId || null,
+      createdAt: engagement.createdAt || "", savedAt: engagement.savedAt || ""
+    })),
+    engagementTasks: engagementTasks.map((task) => ({
+      id: task.id, engagementId: task.engagementId, title: task.title, notes: task.notes || "",
+      timing: task.timing || "undated", dueDate: task.dueDate || "", status: task.status || "backlog",
+      sortOrder: task.sortOrder ?? 0, createdAt: task.createdAt || ""
     }))
   };
 }

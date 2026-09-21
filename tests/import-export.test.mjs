@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildClickUpCsv, buildNotionMarkdown, detectImportFormat, importPreview, mapClickUpStatus, parseAssignees,
+  buildClickUpCsv, buildLedgerLaneBackup, buildNotionMarkdown, detectImportFormat, importPreview, mapClickUpStatus, parseAssignees,
   parseClickUpPriority, parseCsv, parseImport, parseImportedDate, toClickUpPriority
 } from "../import-export.mjs";
 
@@ -78,4 +78,18 @@ test("Notion export is Markdown to-dos grouped by project and column", () => {
   assert.match(markdown, /## Finance/);
   assert.match(markdown, /### In progress/);
   assert.equal(buildNotionMarkdown([]), "# LedgerLane\n\nNo tasks to copy.\n");
+});
+
+test("LedgerLane backup preserves follow-on engagement lists and links", () => {
+  const backup = buildLedgerLaneBackup({
+    projects: [{ id: "p1", name: "Autumn programme support" }], columns: [], tasks: [], tags: [],
+    engagements: [{ id: "e1", name: "Autumn programme support", terms: "barter", exchangeNote: "Office hours for facilitation", priorProjectId: "p0", projectId: "p1", createdAt: "2026-09-20T00:00:00.000Z" }],
+    engagementTasks: [{ id: "et1", engagementId: "e1", title: "Run workshop", notes: "Bring materials", timing: "ongoing", status: "backlog", sortOrder: 1 }]
+  });
+  const parsed = parseImport(JSON.stringify(backup), "ledgerlane-backup.json");
+  assert.equal(backup.version, 2);
+  assert.equal(parsed.engagements[0].terms, "barter");
+  assert.equal(parsed.engagements[0].projectId, "p1");
+  assert.equal(parsed.engagementTasks[0].sourceEngagementId, "e1");
+  assert.equal(parsed.engagementTasks[0].timing, "ongoing");
 });

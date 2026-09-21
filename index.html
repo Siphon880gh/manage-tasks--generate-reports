@@ -113,6 +113,93 @@
       </footer>
     </form>
   </dialog>
+  <dialog id="engagement-dialog" class="engagement-dialog">
+    <form id="engagement-form">
+      <header class="modal-head">
+        <div><p class="eyebrow">Follow-on engagement</p><h2>Capture the next stretch of work</h2></div>
+        <button class="icon-button" type="button" id="close-engagement" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <div class="field">
+          <label for="engagement-name">Engagement name</label>
+          <input id="engagement-name" name="name" required placeholder="e.g. Autumn programme support" maxlength="80">
+        </div>
+        <fieldset class="terms-pick">
+          <legend>Engagement terms <span aria-hidden="true">(required)</span></legend>
+          <p class="hint">Choose the arrangement before you make the work list.</p>
+          <div class="terms-grid" id="engagement-terms">
+            <label class="term-choice"><input type="radio" name="terms" value="one-time" required><span><strong>One-time</strong><small>Fixed fee / single settlement</small></span></label>
+            <label class="term-choice"><input type="radio" name="terms" value="retainer"><span><strong>Retainer</strong><small>Ongoing, recurring arrangement</small></span></label>
+            <label class="term-choice"><input type="radio" name="terms" value="barter"><span><strong>Barter</strong><small>In-kind exchange — work for work, goods, or access; not cash</small></span></label>
+            <label class="term-choice"><input type="radio" name="terms" value="community-partnership"><span><strong>Community partnership</strong><small>Advocacy / community-advocate deal; non-cash, not a swap</small></span></label>
+          </div>
+        </fieldset>
+        <details class="advanced-options" id="engagement-advanced">
+          <summary>Advanced</summary>
+          <div class="engagement-advanced-fields">
+            <label class="check-line engagement-cash-override" id="engagement-cash-override" hidden><input type="checkbox" name="cashOverride"> Set a cash amount anyway</label>
+            <div class="field" id="engagement-amount-field">
+              <label for="engagement-amount">Amount (USD, optional)</label>
+              <input id="engagement-amount" name="amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+              <p class="hint" id="engagement-amount-hint">Optional for one-time or retainer work.</p>
+            </div>
+            <div class="field" id="engagement-exchange-field" hidden>
+              <label for="engagement-exchange-note">What is exchanged? (optional)</label>
+              <textarea id="engagement-exchange-note" name="exchangeNote" placeholder="e.g. Quarterly legal office hours for workshop facilitation"></textarea>
+            </div>
+            <div class="field" id="engagement-arrangement-field" hidden>
+              <label for="engagement-arrangement-note">Advocacy arrangement (optional)</label>
+              <textarea id="engagement-arrangement-note" name="arrangementNote" placeholder="e.g. Community ambassador programme and event access"></textarea>
+            </div>
+            <div class="field">
+              <label for="engagement-prior-project">Link to prior project (optional)</label>
+              <select id="engagement-prior-project" name="priorProjectId"></select>
+            </div>
+          </div>
+        </details>
+      </div>
+      <footer class="form-actions">
+        <button class="button" type="button" id="cancel-engagement">Cancel</button>
+        <button class="button primary" type="submit">Create work list</button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog id="engagement-task-dialog" class="engagement-task-dialog">
+    <form id="engagement-task-form">
+      <input type="hidden" name="id">
+      <header class="modal-head">
+        <div><p class="eyebrow">Work list item</p><h2>Task details</h2></div>
+        <button class="icon-button" type="button" id="close-engagement-task" aria-label="Close">×</button>
+      </header>
+      <div class="form">
+        <div class="field">
+          <label for="engagement-task-title">Task</label>
+          <input id="engagement-task-title" name="title" required maxlength="140" placeholder="What needs doing?">
+        </div>
+        <div class="field">
+          <label for="engagement-task-notes">Notes (optional)</label>
+          <textarea id="engagement-task-notes" name="notes" placeholder="Useful context, handoff notes, or a definition of done"></textarea>
+        </div>
+        <div class="field">
+          <label for="engagement-task-timing">When</label>
+          <select id="engagement-task-timing" name="timing">
+            <option value="undated">Undated</option>
+            <option value="date">Specific date</option>
+            <option value="ongoing">Ongoing</option>
+          </select>
+        </div>
+        <div class="field" id="engagement-task-date-field" hidden>
+          <label for="engagement-task-date">Date</label>
+          <input id="engagement-task-date" name="dueDate" type="date">
+        </div>
+      </div>
+      <footer class="form-actions">
+        <button class="button ghost danger" type="button" id="delete-engagement-task" hidden>Delete task</button>
+        <button class="button" type="button" id="cancel-engagement-task">Cancel</button>
+        <button class="button primary" type="submit">Save task</button>
+      </footer>
+    </form>
+  </dialog>
   <dialog id="import-dialog" class="transfer-dialog">
     <form id="import-form">
       <header class="modal-head">

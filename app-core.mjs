@@ -1,5 +1,42 @@
 export const STATUSES = ["backlog", "progress", "done"];
 
+export const ENGAGEMENT_TERMS = [
+  { id: "one-time", label: "One-time", hint: "Fixed fee / single settlement" },
+  { id: "retainer", label: "Retainer", hint: "Ongoing, recurring arrangement" },
+  { id: "barter", label: "Barter", hint: "In-kind exchange" },
+  { id: "community-partnership", label: "Community partnership", hint: "Advocacy / community-advocate deal" }
+];
+
+export function normalizeEngagementTerms(value) {
+  const id = String(value || "").trim().toLowerCase();
+  return ENGAGEMENT_TERMS.some((term) => term.id === id) ? id : "";
+}
+
+export function engagementTermsLabel(value) {
+  const id = normalizeEngagementTerms(value);
+  return ENGAGEMENT_TERMS.find((term) => term.id === id)?.label || "Terms not set";
+}
+
+export function engagementCashAmount(engagement = {}) {
+  const amount = Number(engagement.amount);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+export function engagementIsCashSettlement(engagement = {}) {
+  const terms = normalizeEngagementTerms(engagement.terms);
+  return Boolean(engagementCashAmount(engagement))
+    && ["one-time", "retainer", "barter", "community-partnership"].includes(terms);
+}
+
+export function engagementWorkTimingLabel(task = {}) {
+  if (task.timing === "ongoing") return "Ongoing";
+  if (task.timing === "date" && task.dueDate) {
+    const date = new Date(`${task.dueDate}T12:00:00`);
+    if (!Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(date);
+  }
+  return "Undated";
+}
+
 export const COLUMN_TYPES = [
   { id: "todo", label: "To do", status: "backlog", unique: false },
   { id: "progress", label: "In progress", status: "progress", unique: false },

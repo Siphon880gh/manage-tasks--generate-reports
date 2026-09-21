@@ -5,7 +5,8 @@ import {
   canManagePeople, canRemoveMember, columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage, destinationAfterColumnDelete, filterByProjectIds, filterTasks,
   invitableUsers, isAdmin, isViewer, naturalJoin, nextReportBlockOrder, normalizeHttpUrl, normalizeReportBlocks,
   reportBlockHasContent, reportRows, roleCaption, seedMemberships, statusToColumnType, blocksForSlot, defaultLinkLabel,
-  googleWorkspaceKind, reindexReportBlocks, emptyBoardFilters, boardFiltersActive, normalizeTagName, toggleListValue
+  googleWorkspaceKind, reindexReportBlocks, emptyBoardFilters, boardFiltersActive, normalizeTagName, toggleListValue,
+  ENGAGEMENT_TERMS, engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, normalizeEngagementTerms
 } from "../app-core.mjs";
 
 const tasks = [
@@ -57,6 +58,18 @@ test("editing a column can keep its unique type; last column cannot be deleted",
 test("status and column types stay aligned", () => {
   assert.equal(columnTypeToStatus("complete"), "done");
   assert.equal(statusToColumnType("progress"), "progress");
+});
+
+test("follow-on engagements keep four explicit terms and non-cash defaults", () => {
+  assert.deepEqual(ENGAGEMENT_TERMS.map((term) => term.id), ["one-time", "retainer", "barter", "community-partnership"]);
+  assert.equal(normalizeEngagementTerms("BARTER"), "barter");
+  assert.equal(normalizeEngagementTerms("proposal"), "");
+  assert.equal(engagementTermsLabel("community-partnership"), "Community partnership");
+  assert.equal(engagementCashAmount({ terms: "barter" }), 0);
+  assert.equal(engagementIsCashSettlement({ terms: "barter" }), false);
+  assert.equal(engagementIsCashSettlement({ terms: "barter", amount: 500 }), true);
+  assert.equal(engagementWorkTimingLabel({ timing: "ongoing" }), "Ongoing");
+  assert.equal(engagementWorkTimingLabel({ timing: "undated" }), "Undated");
 });
 
 test("drop order inserts the moved card at the cued index", () => {

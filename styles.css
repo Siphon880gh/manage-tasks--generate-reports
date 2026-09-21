@@ -223,6 +223,104 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .report-edit-bar,.report-insert,.report-note-tools,#edit-report{display:none!important}
   .report-note{border:0;background:transparent}
   .report-note-body{padding:0 0 16px;max-width:none}
+  @page{margin:16mm}
+  .engagement-page-head,.engagement-index,.engagement-actions,.quick-engagement-task,.engagement-task-edit{display:none!important}
+  .engagements-page{max-width:none;padding:0}
+  .engagement-layout{display:block;border:0;background:transparent}
+  .engagement-workspace{min-height:0;padding:0}
+  .engagement-head{display:block;border-bottom:3px solid #171714;margin:0 0 18px;padding:0 0 16px}
+  .engagement-summary{margin-top:12px;font-size:12px}
+  .engagement-list-section{max-width:none}
+  .engagement-task-row{break-inside:avoid;grid-template-columns:minmax(0,1fr) auto;padding:12px 0}
+  .engagement-task-copy strong{font-size:14px}
+  .engagement-task-copy span{font-size:12px}
+  .engagement-board-note{border:0;background:transparent;padding:0;margin:0 0 14px;font-size:12px}
+}
+
+.engagement-dialog{width:min(780px,calc(100% - 30px))}
+.engagement-dialog .modal-head,.engagement-task-dialog .modal-head{align-items:flex-start}
+.engagement-dialog .modal-head .eyebrow,.engagement-task-dialog .modal-head .eyebrow{margin-bottom:6px}
+.terms-pick{border:0;padding:0;margin:0}
+.terms-pick legend{font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:0}
+.terms-pick .hint{margin:8px 0 12px}
+.terms-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.term-choice{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;border:2px solid #c9c6bb;background:var(--white);padding:12px;cursor:pointer;min-height:96px}
+.term-choice:has(input:checked){border-color:var(--blue);background:#cfddff;box-shadow:3px 3px 0 var(--blue)}
+.term-choice input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--blue)}
+.term-choice strong{display:block;font-size:16px}
+.term-choice small{display:block;margin-top:4px;font-size:13px;line-height:1.35;color:var(--muted);font-family:Manrope,Arial,sans-serif;text-transform:none;letter-spacing:0}
+.engagement-advanced-fields{display:grid;gap:14px}
+.engagement-task-dialog{width:min(600px,calc(100% - 30px))}
+.engagement-dialog [hidden],.engagement-task-dialog [hidden],.quick-engagement-task [hidden]{display:none!important}
+.engagements-page{max-width:1280px}
+.engagement-page-head{margin-bottom:16px}
+.engagement-layout{display:grid;grid-template-columns:minmax(210px,280px) minmax(0,1fr);align-items:start;border:2px solid var(--ink);background:var(--white)}
+.engagement-index{min-height:540px;padding:18px;border-right:2px solid var(--ink);background:#efece1}
+.engagement-index .eyebrow{margin-bottom:12px}
+.engagement-index-list{display:grid;gap:8px}
+.engagement-index-item{display:grid;gap:5px;border:2px solid #c9c6bb;background:var(--white);padding:12px;text-align:left;box-shadow:none}
+.engagement-index-item:hover,.engagement-index-item:focus-visible{border-color:var(--blue)}
+.engagement-index-item.active{border-color:var(--ink);background:var(--acid);box-shadow:3px 3px 0 var(--ink)}
+.engagement-index-item strong{font-size:14px;line-height:1.25}
+.engagement-index-item span{font-family:"DM Mono",monospace;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.engagement-workspace{padding:clamp(20px,4vw,48px);min-height:540px}
+.engagement-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;border-bottom:4px solid var(--ink);padding-bottom:22px;margin-bottom:22px}
+.engagement-head .eyebrow{margin-bottom:7px}
+.engagement-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.engagement-saved,.engagement-term,.engagement-timing{font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.engagement-saved{padding:8px 10px;border:2px solid var(--ink);background:#cfddff}
+.engagement-summary{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:13px;max-width:65ch;font-size:14px;line-height:1.45}
+.engagement-summary > span:not(.engagement-term){color:var(--muted)}
+.engagement-term{display:inline-flex;align-items:center;border:2px solid var(--ink);background:var(--ink);color:var(--acid);padding:3px 7px}
+.engagement-board-note{margin:0 0 18px;padding:12px 14px;border:2px solid var(--ink);background:#efece1;font-size:16px;line-height:1.45;max-width:65ch}
+.engagement-list-section{max-width:760px}
+.engagement-list-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}
+.engagement-list-heading h2{margin:0;font-size:18px;letter-spacing:-.02em}
+.engagement-list-heading span{font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.engagement-task-list{list-style:none;margin:0;padding:0;border-top:2px solid var(--ink)}
+.engagement-task-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;border-bottom:2px solid var(--ink);padding:13px 0}
+.engagement-task-copy{display:grid;gap:4px;border:0;background:transparent;padding:0;text-align:left;box-shadow:none}
+.engagement-task-copy:not(:disabled){cursor:pointer}
+.engagement-task-copy:not(:disabled):hover strong{text-decoration:underline;text-underline-offset:3px}
+.engagement-task-copy:disabled{color:inherit;cursor:default;opacity:1}
+.engagement-task-copy strong{font-size:16px;line-height:1.35}
+.engagement-task-copy span{font-size:14px;line-height:1.4;color:var(--muted);max-width:58ch}
+.engagement-timing{padding:4px 6px;background:#efece1;border:1px solid var(--ink);white-space:nowrap}
+.engagement-task-edit{font-size:14px;white-space:nowrap}
+.engagement-list-empty{padding:22px 0;color:var(--muted);font-size:16px}
+.quick-engagement-task{margin-top:16px;padding:14px 0 0}
+.quick-engagement-row{display:flex;gap:10px}
+.quick-engagement-row input{flex:1;min-width:0;border:2px solid var(--ink);background:var(--white);padding:12px 14px;font-size:16px}
+.quick-engagement-details{border-top:0;padding-top:0}
+.quick-engagement-details summary{cursor:pointer;padding:11px 0 3px;font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.quick-engagement-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,.45fr);gap:12px;margin-top:8px}
+.quick-engagement-fields #quick-engagement-date-field{grid-column:2}
+.engagement-empty{padding:clamp(24px,5vw,64px);min-height:420px;display:grid;align-content:center;justify-items:start;gap:14px}
+.engagement-empty .hint{margin-bottom:6px}
+.invoice-engagements{margin:0 0 24px;border:2px solid var(--ink);background:#efece1}
+.invoice-engagements h3{margin:0;padding:10px 12px;border-bottom:2px solid var(--ink);font-family:"DM Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.invoice-engagement-row{display:flex;justify-content:space-between;gap:16px;padding:12px;border-bottom:1px solid #c9c6bb;background:var(--white)}
+.invoice-engagement-row:last-child{border-bottom:0}
+.invoice-engagement-row div{display:grid;gap:3px}
+.invoice-engagement-row span{font-family:"DM Mono",monospace;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.invoice-engagement-row p{margin:0;max-width:40ch;text-align:right;font-size:14px;line-height:1.4}
+.invoice-engagement-row.is-noncash p{font-weight:700;color:var(--ink)}
+@media(max-width:800px){
+  .terms-grid{grid-template-columns:1fr}
+  .engagement-layout{grid-template-columns:1fr}
+  .engagement-index{min-height:0;border-right:0;border-bottom:2px solid var(--ink)}
+  .engagement-index-list{display:flex;overflow-x:auto;padding:0 4px 5px 0}
+  .engagement-index-item{min-width:190px}
+  .engagement-head{display:grid}
+  .engagement-actions{justify-content:flex-start}
+  .engagement-task-row{grid-template-columns:minmax(0,1fr) auto}
+  .engagement-task-edit{grid-column:2}
+  .quick-engagement-row{display:grid}
+  .quick-engagement-row .button{justify-self:start}
+  .quick-engagement-fields{grid-template-columns:1fr}
+  .quick-engagement-fields #quick-engagement-date-field{grid-column:auto}
+  .invoice-engagement-row{display:grid}
+  .invoice-engagement-row p{text-align:left}
 }
 
 :root{
