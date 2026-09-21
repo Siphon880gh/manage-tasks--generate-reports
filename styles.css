@@ -276,6 +276,17 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .color-picker{border:0;padding:0;margin:12px 0 0;min-width:0}
 .color-picker-row{display:flex;flex-wrap:wrap;gap:8px}
 .color-choice{min-height:44px;cursor:pointer}
+.card-swatch-toggle{margin-left:auto;flex:0 0 44px;width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--ink);background:var(--white);padding:0;box-shadow:none}
+.card-swatch-toggle:hover,.card-swatch-toggle:focus-visible{background:var(--acid)}
+.card-swatch-toggle[aria-expanded="true"]{background:var(--ink)}
+.card-swatch-toggle[aria-expanded="true"] .color-swatch-fill{border-color:#fffefa}
+.card-inline-picker{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+.card-color-option{display:inline-flex;align-items:center;gap:8px;border:2px solid var(--ink);background:var(--white);padding:6px 8px 6px 4px;font-size:14px;font-weight:700;min-height:44px;box-shadow:none}
+.card-color-option[aria-pressed="true"]{background:var(--ink);color:#fffefa}
+.card-color-option:hover,.card-color-option:focus-visible{background:var(--acid);color:var(--ink)}
+.card-tag-picker{display:grid;gap:10px;margin:0 0 12px;padding:10px;border:2px solid var(--ink);background:var(--white)}
+.card-tag-add{background:var(--white)}
+.card-tag-add[aria-expanded="true"]{background:var(--ink);color:#fffefa}
 @media(max-width:800px){
   .facet-bar{padding:12px}
   .new-tag-form{width:100%}

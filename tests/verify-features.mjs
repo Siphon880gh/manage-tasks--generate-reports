@@ -170,6 +170,19 @@ try {
   check("color filter alone", await page.locator(".task-card").count() === 2);
   await page.locator("#clear-filters").click();
   check("clear color filter", await page.locator(".task-card").count() === 6);
+  check("editor has card color swatches", await page.locator(".card-swatch-toggle").count() === 6);
+  check("editor has card tag add", await page.locator(".card-tag-add").count() === 6);
+  const notesCard = page.locator(".task-card").filter({ hasText: "Publish migration notes" });
+  await notesCard.locator(".card-swatch-toggle").click();
+  check("card color picker opens", await notesCard.locator(".card-color-option").count() === 6);
+  await notesCard.locator('[data-set-card-color="acid"]').click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".task-card")].some((card) => card.dataset.color === "acid" && (card.innerText || "").includes("Publish migration notes")));
+  check("card color from card", await notesCard.getAttribute("data-color") === "acid");
+  await notesCard.locator(".card-tag-add").click();
+  await notesCard.locator(".card-new-tag").fill("launch");
+  await notesCard.locator("[data-add-card-tag]").click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".card-tag")].some((el) => (el.textContent || "").trim().toLowerCase() === "launch"));
+  check("create tag from card", await notesCard.locator(".card-tag").filter({ hasText: /^launch$/i }).count() === 1);
 
   await page.locator(".task-card").first().click();
   await page.waitForSelector("#task-dialog[open]");
@@ -348,11 +361,16 @@ try {
   check("viewer cards are not draggable", await page.locator(".task-card[draggable=true]").count() === 0);
   check("viewer can use tag filters", await page.locator("#tag-filters [data-filter-tag]").count() >= 1);
   check("viewer cannot create tags", await page.locator("#new-tag-form").count() === 0);
+  check("viewer cannot color cards", await page.locator(".card-swatch-toggle").count() === 0);
+  check("viewer cannot tag from cards", await page.locator(".card-tag-add").count() === 0);
   await page.locator(".task-card").first().click();
   await page.waitForSelector("#task-dialog[open]");
   check("viewer can open a task", await page.locator("#task-dialog").evaluate((dialog) => dialog.open));
   check("viewer task is read-only", await page.locator("#task-form [name=title]").isDisabled());
   check("viewer cannot save", await page.getByRole("button", { name: "Save task" }).count() === 0);
+  await page.locator("#task-details summary").click();
+  check("viewer cannot add task tag", await page.locator("#add-task-tag").count() === 0);
+  check("viewer cannot change card color", await page.locator("#task-color-list input:not([disabled])").count() === 0);
   await page.locator("#cancel-task").click();
   await page.locator("#task-dialog").waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "Reports" }).first().click();

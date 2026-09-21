@@ -3,7 +3,7 @@ import {
   boardFiltersActive, boardRole, canAccessBoard, canAddColumnType, canAssignRole, canDeleteColumn, canEditBoard,
   canManagePeople, canRemoveMember, columnTypeToStatus, confirmDeleteColumnMessage, confirmDeleteMessage,
   destinationAfterColumnDelete, blocksForSlot, defaultLinkLabel, emptyBoardFilters, emptyReportLayouts, filterTasks,
-  findTagByName, formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
+  cardColorMeta, findTagByName, formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
   normalizeBoardRole, normalizeCardColor, normalizeHttpUrl, normalizeReportBlocks, normalizeTagIds, normalizeTagName,
   plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, sortTasks,
   statusToColumnType, taskProgress, toCsv, toggleListValue
@@ -36,6 +36,8 @@ const state = {
   recording: { active: false, recorder: null, stream: null, chunks: [], taskId: null, startedAt: 0, timer: null },
   modalAttachments: [],
   suppressCardClick: false,
+  openCardMenu: null,
+  cardMenuFocus: false,
   pendingImport: null,
   boardStructure: false,
   structureRestoreAll: false
@@ -524,6 +526,61 @@ async function createTag(rawName) {
   return writeTag(rawName);
 }
 
+async function patchTask(id, changes) {
+  if (!guardEdit()) return null;
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task) return null;
+  const next = { ...task, ...changes };
+  await put("tasks", next);
+  return next;
+}
+
+function toggleCardMenu(id) {
+  if (!guardEdit()) return;
+  state.openCardMenu = state.openCardMenu === id ? null : id;
+  state.cardMenuFocus = Boolean(state.openCardMenu?.startsWith("card-tags-"));
+  render();
+}
+
+async function setTaskColor(taskId, color) {
+  const next = await patchTask(taskId, { color: normalizeCardColor(color) });
+  if (!next) return false;
+  state.openCardMenu = null;
+  toast("Card color saved");
+  await refresh();
+  return true;
+}
+
+async function toggleTaskTag(taskId, tagId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return false;
+  const next = await patchTask(taskId, { tagIds: toggleListValue(normalizeTagIds(task.tagIds), tagId) });
+  if (!next) return false;
+  state.openCardMenu = `card-tags-${taskId}`;
+  await refresh();
+  return true;
+}
+
+async function addTagToCard(taskId, rawName, input) {
+  if (!guardEdit()) return;
+  const name = normalizeTagName(rawName);
+  if (!name) {
+    toast("Name the tag");
+    input?.focus();
+    return;
+  }
+  const existed = Boolean(findTagByName(state.tags, name));
+  const tag = await createTag(name);
+  if (!tag) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  await patchTask(taskId, { tagIds: normalizeTagIds([...(task.tagIds || []), tag.id]) });
+  state.openCardMenu = `card-tags-${taskId}`;
+  state.cardMenuFocus = true;
+  toast(existed ? "Tag already exists" : "Tag added");
+  await refresh();
+}
+
 async function ensureTagIds(names = []) {
   const ids = [];
   for (const name of names) {
@@ -688,16 +745,54 @@ function addColumnMarkup() {
 function taskCard(task) {
   const selected = state.selection.has(task.id);
   const color = normalizeCardColor(task.color);
+  const colorMeta = cardColorMeta(color);
   const tags = tagsForTask(task);
+  const edit = canEdit();
+  const colorOpen = edit && state.openCardMenu === `card-color-${task.id}`;
+  const tagsOpen = edit && state.openCardMenu === `card-tags-${task.id}`;
   const clip = (task.attachmentCount || 0) > 0 ? `<span class="clip" title="Has attachments">▣</span>` : "";
-  const tagRow = tags.length
-    ? `<div class="card-tags">${tags.map((tag) => `<button type="button" class="card-tag" data-card-tag="${tag.id}">${escapeHtml(tag.name)}</button>`).join("")}</div>`
+  const colorToggle = edit
+    ? `<button type="button" class="card-swatch-toggle" data-card-color-open="${task.id}" aria-expanded="${colorOpen ? "true" : "false"}" aria-label="Set card color, ${escapeHtml(colorMeta.label)}">
+        <span class="color-swatch-fill" data-color="${color}"></span>
+      </button>`
     : "";
-  return `<article class="task-card ${selected ? "is-selected" : ""}" ${canEdit() ? `draggable="true"` : ""} data-id="${task.id}" data-color="${color}" tabindex="0">
+  const colorPicker = colorOpen
+    ? `<div class="card-inline-picker" role="group" aria-label="Card color">
+        ${CARD_COLORS.map((item) => `<button type="button" class="card-color-option" data-set-card-color="${item.id}" data-task="${task.id}" aria-pressed="${item.id === color ? "true" : "false"}">
+          <span class="color-swatch-fill" data-color="${item.id}"></span>
+          <span>${escapeHtml(item.label)}</span>
+        </button>`).join("")}
+      </div>`
+    : "";
+  const tagButtons = tags.map((tag) => `<button type="button" class="card-tag" data-card-tag="${tag.id}">${escapeHtml(tag.name)}</button>`).join("");
+  const tagAdd = edit
+    ? `<button type="button" class="card-tag card-tag-add" data-card-tag-open="${task.id}" aria-expanded="${tagsOpen ? "true" : "false"}">＋ Tag</button>`
+    : "";
+  const tagPicker = tagsOpen
+    ? `<div class="card-inline-picker card-tag-picker">
+        ${state.tags.length
+          ? `<div class="tag-option-list">${state.tags.map((tag) => {
+            const on = tags.some((item) => item.id === tag.id);
+            return `<label class="tag-option"><input type="checkbox" data-toggle-card-tag="${tag.id}" data-task="${task.id}" ${on ? "checked" : ""}> ${escapeHtml(tag.name)}</label>`;
+          }).join("")}</div>`
+          : `<p class="hint">No tags yet.</p>`}
+        <div class="new-tag-row">
+          <label class="visually-hidden" for="card-new-tag-${task.id}">New tag</label>
+          <input id="card-new-tag-${task.id}" class="card-new-tag" maxlength="32" placeholder="New tag" autocomplete="off" data-task="${task.id}">
+          <button class="button" type="button" data-add-card-tag="${task.id}">Add</button>
+        </div>
+      </div>`
+    : "";
+  const tagRow = (tags.length || edit)
+    ? `<div class="card-tags">${tagButtons}${tagAdd}</div>${tagPicker}`
+    : "";
+  return `<article class="task-card ${selected ? "is-selected" : ""}" ${edit ? `draggable="true"` : ""} data-id="${task.id}" data-color="${color}" tabindex="0">
     <div class="card-top">
-      ${canEdit() ? `<label class="task-check"><input type="checkbox" data-select="${task.id}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(task.title)}"></label>` : ""}
+      ${edit ? `<label class="task-check"><input type="checkbox" data-select="${task.id}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(task.title)}"></label>` : ""}
       <span class="tag ${task.priority}">${escapeHtml(task.priority)} priority</span>
+      ${colorToggle}
     </div>
+    ${colorPicker}
     <h3>${escapeHtml(task.title)}</h3>
     <p class="project">${escapeHtml(task.project)}</p>
     ${tagRow}
@@ -800,7 +895,11 @@ function bindBoard() {
   document.querySelector("#close-dialog").onclick = document.querySelector("#cancel-task").onclick = () => closeTaskDialog();
   document.querySelectorAll(".task-card").forEach((card) => {
     card.onclick = () => { if (!state.suppressCardClick) openTask(card.dataset.id); };
-    card.onkeydown = (event) => { if (event.key === "Enter") openTask(card.dataset.id); };
+    card.onkeydown = (event) => {
+      if (event.key !== "Enter") return;
+      if (event.target.closest(".card-swatch-toggle, .card-tag, .card-inline-picker, .task-check")) return;
+      openTask(card.dataset.id);
+    };
   });
   bindFacetFilters();
   if (!canEdit()) {
@@ -808,6 +907,7 @@ function bindBoard() {
     bindTaskEditor(dialog, true);
     return;
   }
+  bindCardMarking();
   document.querySelectorAll("#new-task, #fab-new-task").forEach((button) => { button.onclick = () => openTask(); });
   document.querySelector("#new-project")?.addEventListener("click", () => openProjectPrompt({ switchFilter: true }));
   document.querySelector("#done-structure")?.addEventListener("click", () => setBoardStructure(false));
@@ -1017,6 +1117,64 @@ function bindFacetFilters() {
     render();
     document.querySelector("#new-tag-name")?.focus();
   });
+}
+
+function stopCardChrome(node) {
+  if (!node) return;
+  node.addEventListener("click", (event) => event.stopPropagation());
+  node.addEventListener("pointerdown", (event) => event.stopPropagation());
+  node.addEventListener("keydown", (event) => event.stopPropagation());
+}
+
+function bindCardMarking() {
+  document.querySelectorAll("[data-card-color-open]").forEach((button) => {
+    stopCardChrome(button);
+    button.onclick = (event) => {
+      event.stopPropagation();
+      toggleCardMenu(`card-color-${button.dataset.cardColorOpen}`);
+    };
+  });
+  document.querySelectorAll("[data-card-tag-open]").forEach((button) => {
+    stopCardChrome(button);
+    button.onclick = (event) => {
+      event.stopPropagation();
+      toggleCardMenu(`card-tags-${button.dataset.cardTagOpen}`);
+    };
+  });
+  document.querySelectorAll(".card-inline-picker").forEach((picker) => stopCardChrome(picker));
+  document.querySelectorAll("[data-set-card-color]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      await setTaskColor(button.dataset.task, button.dataset.setCardColor);
+    };
+  });
+  document.querySelectorAll("[data-toggle-card-tag]").forEach((input) => {
+    input.onchange = async (event) => {
+      event.stopPropagation();
+      await toggleTaskTag(input.dataset.task, input.dataset.toggleCardTag);
+    };
+  });
+  document.querySelectorAll("[data-add-card-tag]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      const taskId = button.dataset.addCardTag;
+      const input = document.querySelector(`#card-new-tag-${CSS.escape(taskId)}`);
+      await addTagToCard(taskId, input?.value || "", input);
+    };
+  });
+  document.querySelectorAll(".card-new-tag").forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelector(`[data-add-card-tag="${input.dataset.task}"]`)?.click();
+    });
+  });
+  if (state.cardMenuFocus && state.openCardMenu?.startsWith("card-tags-")) {
+    const taskId = state.openCardMenu.slice("card-tags-".length);
+    document.querySelector(`#card-new-tag-${CSS.escape(taskId)}`)?.focus();
+  }
+  state.cardMenuFocus = false;
 }
 
 function selectedTaskTagIds() {
@@ -1272,6 +1430,7 @@ function revokeModalUrls() {
 async function openTask(id) {
   try {
     if (!id && !guardEdit()) return;
+    state.openCardMenu = null;
     const dialog = document.querySelector("#task-dialog");
     const form = document.querySelector("#task-form");
     const field = (name) => form?.elements.namedItem(name) || form?.querySelector(`[name="${name}"]`);
