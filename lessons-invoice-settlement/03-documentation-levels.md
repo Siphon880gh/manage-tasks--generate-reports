@@ -58,3 +58,6 @@ Apply a baseline to the whole invoice and enhanced support only to risky lines. 
 
 Document the selected level and exceptions. A short decision such as “Level 2; formal acceptance additionally required for milestone 4” is more useful than an unwritten habit.
 
+## Sample CSV
+
+[Download the documentation-level decision register](samples/03-documentation-levels.csv). Use it to record the selected support level, risk rationale, and any enhanced controls.

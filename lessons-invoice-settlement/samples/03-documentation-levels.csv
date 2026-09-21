@@ -1,0 +1,4 @@
+engagement_id,value_usd,risk_factor,customer_requirement,selected_level,required_support,exception,decision_owner,decision_date
+ENG-201,450,Routine repeat service,Email submission,Level 1,Accepted quote; completion reference; invoice; receipt,,Avery Chen,2026-09-01
+ENG-104,3000,Time based; several deliverables,Evidence by deliverable,Level 2,Agreement; period hours; named evidence; rate reconciliation; review checklist,,Riley Patel,2026-09-01
+ENG-301,75000,Grant funded; formal procurement,Portal submission and formal acceptance,Level 3,Versioned contract; PO; formal acceptance; independent approval; payment match,Milestone 4 also requires counsel review,Sam Okafor,2026-09-02

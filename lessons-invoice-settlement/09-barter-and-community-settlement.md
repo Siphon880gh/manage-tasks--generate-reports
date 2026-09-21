@@ -38,3 +38,6 @@ A useful close-out states:
 
 This is clearer than marking a cash invoice “paid” when no cash moved.
 
+## Sample CSV
+
+[Download the non-cash settlement register](samples/09-non-cash-settlement.csv). Use it to track both sides of an exchange and keep a real cash component separate from non-cash consideration.

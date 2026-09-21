@@ -32,3 +32,6 @@ Before issue, verify currency and beneficiary details using an approved, indepen
 
 After receipt, match the exact amount, payer, currency, value date, invoice reference, and remittance advice. Treat bank fees, withholding, foreign-exchange differences, and partial payment as reconciling items rather than silently marking the whole invoice paid.
 
+## Sample CSV
+
+[Download the cash-arrangement reconciliation](samples/08-cash-arrangements.csv). Use it to compare retainer, fixed-fee, time-and-materials, and one-time settlement mechanics.

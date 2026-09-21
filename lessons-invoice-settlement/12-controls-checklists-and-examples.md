@@ -58,3 +58,6 @@ Agreement: consulting is exchanged for venue access plus a $500 travel reimburse
 
 Give the close packet to a knowledgeable person who did not prepare it. If they can reproduce the scope, quantity, price, approvals, transfer, and final balance without oral explanation, the settlement record is doing its job.
 
+## Sample CSV
+
+[Download the close-control register](samples/12-close-control-register.csv). Use it to evidence reviewer checks, matched consideration, retained revisions, and the reason a record is open or closed.

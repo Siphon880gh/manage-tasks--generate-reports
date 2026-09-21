@@ -48,3 +48,6 @@ Retain the agreement and changes, final settlement schedule, formal invoice or n
 
 Finally, record lessons for the next cycle: late evidence, recurring customer rejection codes, rate discrepancies, or unclear lines. Settlement is complete when the balance is resolved **and** the reasoning can be reconstructed.
 
+## Sample CSV
+
+[Download the payment reconciliation](samples/11-payment-reconciliation.csv). Use it to allocate receipts, identify reconciling items, and leave unresolved balances open.

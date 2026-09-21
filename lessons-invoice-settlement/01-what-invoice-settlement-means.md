@@ -28,3 +28,6 @@ LedgerLane's Invoice settlement report is best understood as the middle record: 
 
 Do not optimize for the largest possible evidence pack. Optimize for a clear chain from **agreement → work → calculation → approval → settlement**. Every additional document should make one of those links more reliable.
 
+## Sample CSV
+
+[Download the settlement lifecycle tracker](samples/01-settlement-lifecycle.csv). Use it to distinguish completed, pending, and blocked events before calling an obligation settled.

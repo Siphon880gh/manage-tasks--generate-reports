@@ -1,0 +1,4 @@
+receipt_id,value_date,payer,currency,gross_receipt,invoice_id,invoice_amount,allocated_amount,bank_fee,withholding,credit_applied,remaining_open,match_status,support_reference
+RCPT-601,2026-11-04,Northstar Co,USD,2850,INV-2026-091-R1,2850,2850,0,0,0,0,Matched,Remittance RA-601
+RCPT-602,2026-11-10,Acme Foundation,USD,4900,INV-2026-102,5000,4900,0,100,0,0,Matched with withholding,Withholding certificate WC-44
+RCPT-603,2026-11-12,Bright Labs,USD,1200,INV-2026-107,2000,1200,0,0,0,800,Partial,Remittance RA-603

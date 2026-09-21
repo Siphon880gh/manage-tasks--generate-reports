@@ -40,3 +40,6 @@ An owner helps route questions; the billing period assigns the work to a settlem
 
 A reviewer should be able to read a line and answer: “What did the customer receive, under which agreement, in which period, for what quantity or price, and where is the proof?” If not, revise the structure.
 
+## Sample CSV
+
+[Download the deliverable-line schedule](samples/04-deliverable-lines.csv). Use it to practice stable keys, parent/detail rows, client-facing names, and report inclusion decisions.
