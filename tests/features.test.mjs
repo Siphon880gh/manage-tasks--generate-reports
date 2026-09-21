@@ -6,7 +6,8 @@ import {
   invitableUsers, isAdmin, isViewer, naturalJoin, nextReportBlockOrder, normalizeHttpUrl, normalizeReportBlocks,
   reportBlockHasContent, reportRows, roleCaption, seedMemberships, statusToColumnType, blocksForSlot, defaultLinkLabel,
   googleWorkspaceKind, reindexReportBlocks, emptyBoardFilters, boardFiltersActive, normalizeTagName, toggleListValue,
-  ENGAGEMENT_TERMS, engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, normalizeEngagementTerms
+  ENGAGEMENT_TERMS, engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, normalizeEngagementTerms,
+  settlementAssets, settlementHours
 } from "../app-core.mjs";
 
 const tasks = [

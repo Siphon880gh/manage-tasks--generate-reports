@@ -308,6 +308,19 @@ export function reportRows(tasks, type, options = {}) {
   return scoped.map((task) => ({ ...task, result: task.status === "done" ? "Complete" : task.priority }));
 }
 
+export function settlementAssets(task = {}) {
+  const stored = Array.isArray(task.settlementAssets) ? task.settlementAssets : [];
+  return stored.map((asset) => ({
+    name: String(asset?.name || "").trim(),
+    url: normalizeHttpUrl(asset?.url || "")
+  })).filter((asset) => asset.url);
+}
+
+export function settlementHours(task = {}) {
+  const hours = Number(task.settlementHours);
+  return Number.isFinite(hours) && hours > 0 ? hours : 0;
+}
+
 export const REPORT_TYPES = ["invoice", "project", "stakeholder"];
 
 export const REPORT_SLOTS = [

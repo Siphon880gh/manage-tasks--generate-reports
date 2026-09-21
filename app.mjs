@@ -6,7 +6,7 @@ import {
   engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, findTagByName,
   formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
   normalizeBoardRole, cardColorMeta, normalizeCardColor, normalizeEngagementTerms, normalizeHttpUrl, normalizeReportBlocks, normalizeTagIds, normalizeTagName,
-  plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, sortTasks,
+  plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, settlementAssets, settlementHours, sortTasks,
   statusToColumnType, taskProgress, toCsv, toggleListValue
 } from "./app-core.mjs";
 import {
@@ -1164,6 +1164,15 @@ function taskDialog() {
           </div>
           <p class="hint">✎ Changing these timestamps marks this task as manually adjusted in reports.</p>
           <div class="field"><label>Settlement amount (USD)</label><input type="number" min="0" step="1" name="rate" placeholder="0" ${lock}></div>
+          <div class="form-grid">
+            <div class="field"><label>Billable hours</label><input type="number" min="0" step="0.25" name="settlementHours" placeholder="0" ${lock}></div>
+            <div class="field"><label>Billing period</label><input name="settlementPeriod" placeholder="e.g. September 2026" ${lock}></div>
+          </div>
+          <fieldset class="settlement-assets" ${locked ? "disabled" : ""}>
+            <legend>Settlement evidence</legend>
+            <p class="hint">Add up to three supporting files, such as a Google Drive screenshot, document, or folder.</p>
+            ${[0, 1, 2].map((index) => `<div class="settlement-asset-row"><label>Label<input name="assetName${index}" placeholder="e.g. Approved screenshot"></label><label>URL<input name="assetUrl${index}" type="url" placeholder="https://drive.google.com/file/d/…"></label></div>`).join("")}
+          </fieldset>
         </details>
       </div>
       <footer class="form-actions">
@@ -1756,6 +1765,13 @@ async function openTask(id) {
     field("createdAt").value = localDateTime(task?.createdAt || new Date().toISOString());
     field("completedAt").value = localDateTime(task?.completedAt);
     field("rate").value = task?.rate || "";
+    field("settlementHours").value = task?.settlementHours || "";
+    field("settlementPeriod").value = task?.settlementPeriod || "";
+    const assets = Array.isArray(task?.settlementAssets) ? task.settlementAssets : [];
+    [0, 1, 2].forEach((index) => {
+      field(`assetName${index}`).value = assets[index]?.name || "";
+      field(`assetUrl${index}`).value = assets[index]?.url || "";
+    });
     renderTaskTagList(task?.tagIds, !canEdit());
     renderTaskColorList(task?.color, !canEdit());
     const editor = document.querySelector("#task-description");
@@ -1853,6 +1869,12 @@ async function saveTask(event) {
     priority: data.get("priority"),
     description,
     rate: Number(data.get("rate")) || 0,
+    settlementHours: Math.max(0, Number(data.get("settlementHours")) || 0),
+    settlementPeriod: String(data.get("settlementPeriod") || "").trim(),
+    settlementAssets: [0, 1, 2].map((index) => ({
+      name: String(data.get(`assetName${index}`) || "").trim(),
+      url: normalizeHttpUrl(data.get(`assetUrl${index}`))
+    })).filter((asset) => asset.url),
     createdAt,
     completedAt,
     timestampOverridden: old ? old.createdAt !== createdAt || old.completedAt !== completedAt || old.timestampOverridden : createdAt.slice(0, 16) !== new Date().toISOString().slice(0, 16),
@@ -1992,6 +2014,16 @@ function invoiceEngagementMarkup(engagements) {
   </section>`;
 }
 
+function invoiceEvidenceMarkup(task) {
+  const assets = settlementAssets(task);
+  if (!assets.length) return "—";
+  return `<ul class="invoice-evidence">${assets.map((asset) => {
+    const label = asset.name || defaultLinkLabel(asset.url);
+    const kind = googleWorkspaceKind(asset.url);
+    return `<li><a href="${escapeHtml(asset.url)}" target="_blank" rel="noopener noreferrer" class="${kind ? `report-link-${kind}` : ""}">${escapeHtml(label)}</a></li>`;
+  }).join("")}</ul>`;
+}
+
 function reportsView() {
   const selected = includedProjectIds();
   const rows = reportRows(state.tasks, state.report.type, { projectIds: selected });
@@ -2009,7 +2041,9 @@ function reportsView() {
   const refineOpen = typeof matchMedia === "function" && matchMedia("(min-width: 801px)").matches;
   const editing = reportEditing();
   const table = rows.length
-    ? `<table><thead><tr><th>Work item</th><th>Owner</th>${state.report.showDate || state.report.showTime ? "<th>Reported</th>" : ""}<th>Result</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td>${state.report.showDate || state.report.showTime ? `<td>${formatMoment(task.completedAt || task.createdAt, state.report)}</td>` : ""}<td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table>`
+    ? state.report.type === "invoice"
+      ? `<div class="invoice-table-wrap"><table class="invoice-table"><thead><tr><th>Deliverable</th><th>Owner</th><th>Billing period</th><th>Hours</th><th>Evidence</th><th>Amount</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td><td>${escapeHtml(task.settlementPeriod || formatMoment(task.completedAt || task.createdAt, { showDate: true }))}</td><td>${settlementHours(task) || "—"}</td><td>${invoiceEvidenceMarkup(task)}</td><td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<table><thead><tr><th>Work item</th><th>Owner</th>${state.report.showDate || state.report.showTime ? "<th>Reported</th>" : ""}<th>Result</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td>${state.report.showDate || state.report.showTime ? `<td>${formatMoment(task.completedAt || task.createdAt, state.report)}</td>` : ""}<td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table>`
     : `<div class="empty">No work matches this report yet. ${selected.length ? "" : "Select at least one project."}</div>`;
   return `<main class="main">
     <header class="page-head page-head-work"><div><p class="eyebrow">Reports</p><h1 class="page-title">Proof</h1></div></header>
@@ -2045,7 +2079,7 @@ function reportsView() {
         ${reportSlotMarkup("after-head", editing)}
         <div class="stats">
           <div class="stat"><strong>${rows.length}</strong><small>Items shown</small></div>
-          <div class="stat"><strong>${taskProgress(rows)}%</strong><small>Completion</small></div>
+          <div class="stat"><strong>${state.report.type === "invoice" ? rows.reduce((sum, task) => sum + settlementHours(task), 0) : `${taskProgress(rows)}%`}</strong><small>${state.report.type === "invoice" ? "Billable hours" : "Completion"}</small></div>
           <div class="stat"><strong>${state.report.type === "invoice" ? settlement.nonCashOnly ? "Non-cash" : usd(settlement.total) : projects}</strong><small>${state.report.type === "invoice" ? "Settlement" : "Projects"}</small></div>
         </div>
         ${reportSlotMarkup("after-stats", editing)}
@@ -2231,6 +2265,11 @@ function bindReports() {
       { label: "Task", value: (row) => row.title },
       { label: "Project", value: (row) => row.project },
       { label: "Owner", value: (row) => row.ownerName },
+      ...(state.report.type === "invoice" ? [
+        { label: "Billing period", value: (row) => row.settlementPeriod || formatMoment(row.completedAt || row.createdAt, { showDate: true }) },
+        { label: "Billable hours", value: (row) => settlementHours(row) || "" },
+        { label: "Evidence", value: (row) => settlementAssets(row).map((asset) => `${asset.name || defaultLinkLabel(asset.url)}: ${asset.url}`).join(" | ") }
+      ] : []),
       ...(state.report.showDate || state.report.showTime ? [{ label: "Reported", value: (row) => formatMoment(row.completedAt || row.createdAt, state.report) }] : []),
       { label: "Result", value: (row) => row.result }
     ];
