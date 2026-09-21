@@ -305,6 +305,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .invoice-engagement-row span{font-family:"DM Mono",monospace;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .invoice-engagement-row p{margin:0;max-width:40ch;text-align:right;font-size:14px;line-height:1.4}
 .invoice-engagement-row.is-noncash p{font-weight:700;color:var(--ink)}
+.settlement-assets{border:2px solid var(--ink);padding:14px;display:grid;gap:12px}.settlement-assets legend{font-size:11px;font-weight:800;text-transform:uppercase}.settlement-asset-row{display:grid;grid-template-columns:minmax(140px,.7fr) minmax(220px,1.3fr);gap:10px}.settlement-asset-row label{display:grid;gap:6px;font-size:10px;font-weight:600}.settlement-asset-row input{width:100%;border:2px solid var(--ink);background:var(--white);padding:10px}.invoice-table-wrap{overflow-x:auto}.invoice-table{min-width:900px}.invoice-table td{vertical-align:top}.invoice-evidence{list-style:none;margin:0;padding:0;display:grid;gap:6px}.invoice-evidence a{overflow-wrap:anywhere}
 @media(max-width:800px){
   .terms-grid{grid-template-columns:1fr}
   .engagement-layout{grid-template-columns:1fr}
@@ -321,6 +322,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .quick-engagement-fields #quick-engagement-date-field{grid-column:auto}
   .invoice-engagement-row{display:grid}
   .invoice-engagement-row p{text-align:left}
+  .settlement-asset-row{grid-template-columns:1fr}
 }
 
 :root{
