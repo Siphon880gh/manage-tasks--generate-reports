@@ -45,3 +45,6 @@ Before approval:
 6. tie line amounts to subtotal, taxes, credits, and amount due; and
 7. retain the calculation version used to issue the invoice.
 
+## Sample CSV
+
+[Download the time and rate reconciliation](samples/05-time-periods-and-rates.csv). Use it to preserve worked hours while bridging them to capped billable hours and the net amount.

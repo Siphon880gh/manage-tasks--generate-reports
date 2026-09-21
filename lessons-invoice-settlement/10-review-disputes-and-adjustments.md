@@ -39,3 +39,6 @@ An adjustment needs a reason and authority. Examples include contractual discoun
 
 After resolution, ask why the exception passed preparation. Frequent causes include unclear scope, stale rate cards, weak cut-off, inaccessible links, duplicate parent/child totals, missing PO data, and unclear acceptance. Fix the upstream control rather than merely adding more attachments to the next invoice.
 
+## Sample CSV
+
+[Download the dispute and adjustment log](samples/10-disputes-and-adjustments.csv). Use it to preserve the original exception, its authority, financial effect, and revision trail.

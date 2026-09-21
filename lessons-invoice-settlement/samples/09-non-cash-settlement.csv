@@ -1,0 +1,4 @@
+obligation_id,responsible_party,consideration_type,description,due_date,agreed_value_usd,cash_due_usd,delivery_status,delivery_date,evidence_reference,remaining_obligation
+EXCH-22-A,Consultancy,Non-cash service,Facilitate a four-hour strategy workshop,2026-10-15,2500,0,Delivered,2026-10-15,Signed attendance and workshop outputs,None
+EXCH-22-B,Community venue,Non-cash access,Provide venue for two program days,2026-10-20,2000,0,Delivered,2026-10-19,Booking record and access log,None
+EXCH-22-C,Community venue,Cash reimbursement,Reimburse documented travel,2026-10-30,500,500,Pending,,Receipt packet TR-22,500 USD reimbursement

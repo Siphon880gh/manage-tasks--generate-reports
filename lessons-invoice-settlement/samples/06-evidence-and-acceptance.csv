@@ -1,0 +1,4 @@
+line_key,claim,evidence_name,evidence_url,evidence_date,version,reviewer_access_checked,acceptance_status,approver,decision_date,gap_or_condition
+CONS-01,Discovery interviews completed,Interview notes,https://example.com/evidence/interview-notes,2026-09-12,Final,Yes,Accepted,Jordan Silva,2026-09-14,
+CONS-02,Process map delivered,Approved process map,https://example.com/evidence/process-map-v3,2026-09-22,v3,Yes,Accepted,Jordan Silva,2026-09-24,
+CONS-03,Workshop delivered,Workshop attendance and outcomes,https://example.com/evidence/workshop-outcomes,2026-09-29,Final,Yes,Conditional,Jordan Silva,2026-09-30,Add two absent stakeholders to follow-up distribution

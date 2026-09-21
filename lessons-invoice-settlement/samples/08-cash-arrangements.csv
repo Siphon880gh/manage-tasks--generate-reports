@@ -1,0 +1,5 @@
+engagement_id,arrangement_type,billing_period_or_milestone,opening_balance_usd,addition_or_fee_usd,usage_usd,adjustment_usd,amount_due_usd,closing_balance_usd,billing_trigger,acceptance_reference
+ENG-401,Prepaid-hours retainer,September 2026,6000,6000,4500,0,6000,7500,Monthly funding; usage drawn from balance,September usage approved 2026-10-02
+ENG-105,Fixed fee,Content system acceptance,0,8000,0,0,8000,0,Written milestone acceptance,Acceptance email 2026-10-03
+ENG-403,Time and materials,September 2026,0,3000,0,0,3000,0,Monthly approved hours,Timesheet approval 2026-10-02
+ENG-404,One-time settlement,Final delivery,0,2500,0,-250,2250,0,Accepted final delivery,Final acceptance with 250 USD service credit

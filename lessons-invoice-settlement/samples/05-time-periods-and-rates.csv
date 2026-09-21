@@ -1,0 +1,5 @@
+line_key,billing_period,worked_hours,billable_hours,rate_usd,gross_amount_usd,adjustment_type,adjustment_hours,net_amount_usd,reconciliation_note
+CONS-01,September 2026,6,6,150,900,,0,900,Within monthly cap
+CONS-02,September 2026,8,8,150,1200,,0,1200,Within monthly cap
+CONS-03,September 2026,7,6,150,1050,Cap adjustment,-1,900,21 worked hours reduced to 20 billable hours
+TOTAL,September 2026,21,20,,3150,Cap adjustment,-1,3000,20-hour monthly cap applied

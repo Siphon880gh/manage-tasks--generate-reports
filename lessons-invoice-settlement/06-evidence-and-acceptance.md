@@ -42,3 +42,6 @@ Never replace missing evidence with a misleading label. Mark the gap, assign an 
 
 Open every link from a reviewer-equivalent account. Confirm the label matches the destination, the version is final, the billing period is consistent, and the artifact supports the specific line rather than merely the overall project.
 
+## Sample CSV
+
+[Download the evidence and acceptance register](samples/06-evidence-and-acceptance.csv). Use it to index what each link proves, verify access, and record acceptance conditions.

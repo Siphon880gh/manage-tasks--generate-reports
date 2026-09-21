@@ -41,3 +41,6 @@ Never silently change the billing rule after work is performed. If the parties a
 
 Confirm that the work is attached to the right project and engagement. In LedgerLane, engagement terms may be one-time, retainer, barter, or community partnership. Set the arrangement and amount deliberately: a barter or community arrangement with a positive cash amount is treated as having a cash component, while one without an amount can be presented as non-cash.
 
+## Sample CSV
+
+[Download the billing-basis register](samples/02-billing-basis.csv). Use it to turn agreement terms into explicit, testable billing rules.

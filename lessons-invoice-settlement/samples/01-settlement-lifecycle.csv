@@ -1,0 +1,6 @@
+item_id,invoice_id,event,status,event_date,owner,evidence_reference,open_issue
+CONS-SEP-001,INV-2026-091,Obligation established,Complete,2026-08-20,Avery Chen,SOW-104 signed,
+CONS-SEP-001,INV-2026-091,Performance captured,Complete,2026-09-30,Morgan Lee,September work log,
+CONS-SEP-001,INV-2026-091,Customer approval,Complete,2026-10-03,Jordan Silva,Approval email 2026-10-03,
+CONS-SEP-001,INV-2026-091,Payment matched,Pending,,Riley Patel,,Awaiting remittance
+CONS-SEP-001,INV-2026-091,Settlement closed,Blocked,,Riley Patel,,Payment must be matched first

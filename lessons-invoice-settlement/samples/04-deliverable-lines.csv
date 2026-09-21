@@ -1,0 +1,6 @@
+line_key,parent_line_key,internal_name,client_facing_name,line_type,owner,billing_period,hours,amount_usd,include_on_report
+CONTENT-01,,M06 content build,Content system,Parent,Morgan Lee,September 2026,,8000,Yes
+CONTENT-01.1,CONTENT-01,M06 keyword db,Keyword universe,Detail,Avery Chen,September 2026,10,,Yes
+CONTENT-01.2,CONTENT-01,M06 brief tpl,Article briefing templates,Detail,Jordan Silva,September 2026,12,,Yes
+CONTENT-01.3,CONTENT-01,M06 pub roadmap,Publishing roadmap,Detail,Morgan Lee,September 2026,8,,Yes
+CONTENT-ADMIN,,M06 admin,Internal project administration,Detail,Morgan Lee,September 2026,2,,No

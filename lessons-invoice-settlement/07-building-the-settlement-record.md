@@ -41,3 +41,6 @@ Use **Download CSV** for row-level reconciliation and **Print** for the sheet pr
 
 Store the issued PDF/CSV, timestamp, recipient, and delivery method. Subsequent edits in the live app should not obscure what the customer received. Corrections should create a traceable revision or credit process.
 
+## Sample CSV
+
+[Download the settlement-record schedule](samples/07-settlement-record.csv). Use it as a row-level review example alongside a LedgerLane CSV export; it is a reference worksheet, not an application import template.

@@ -1,0 +1,4 @@
+line_key,project,engagement_id,client_facing_name,parent_line_key,owner,billing_period,billable_hours,evidence_name,evidence_url,amount_usd,report_status
+CONS-01,Operations redesign,ENG-104,Discovery interviews,,Avery Chen,September 2026,6,Interview notes,https://example.com/evidence/interview-notes,900,Ready
+CONS-02,Operations redesign,ENG-104,Process map,,Morgan Lee,September 2026,8,Approved process map,https://example.com/evidence/process-map-v3,1200,Ready
+CONS-03,Operations redesign,ENG-104,Implementation workshop,,Jordan Silva,September 2026,6,Workshop outcomes,https://example.com/evidence/workshop-outcomes,900,Ready

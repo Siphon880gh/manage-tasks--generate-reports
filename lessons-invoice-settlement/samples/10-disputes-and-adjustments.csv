@@ -1,0 +1,4 @@
+case_id,invoice_id,line_key,exception_type,date_opened,customer_question,owner,target_date,status,resolution,adjustment_usd,authority_reference,revision_id
+CASE-17,INV-2026-091,CONS-03,Quantity/rate dispute,2026-10-05,Customer counted five rather than six billable workshop hours,Morgan Lee,2026-10-08,Resolved,Attendance log confirmed six hours,0,Customer confirmation 2026-10-07,
+CASE-18,INV-2026-091,CONS-02,Commercial credit,2026-10-05,Requested credit for late delivery,Riley Patel,2026-10-09,Resolved,Approved 150 USD service credit,-150,Credit approval CA-18,INV-2026-091-R1
+CASE-19,INV-2026-091,,Administrative rejection,2026-10-06,Purchase order omitted from invoice,Avery Chen,2026-10-07,Resolved,Reissued with PO-7782; values unchanged,0,Portal rejection notice,INV-2026-091-R1

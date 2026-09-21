@@ -1,0 +1,4 @@
+engagement_id,contract_reference,billing_basis,currency,billing_cadence,rate_or_fee,cap_or_included_quantity,overage_rule,acceptance_rule,payment_terms,effective_from,effective_to
+ENG-104,SOW-104,Time and materials,USD,Monthly,150 USD/hour,20 hours/month,Written pre-approval required,Deliverable acknowledgment by program lead,Net 30,2026-09-01,2026-11-30
+ENG-105,SOW-105,Fixed fee milestone,USD,On acceptance,8000 USD,Not applicable,Change order required,Written acceptance of content system,Net 30,2026-09-01,2026-12-15
+ENG-106,MOU-22,Barter plus reimbursement,USD,On reciprocal delivery,500 USD reimbursement,Not applicable,Actual travel receipts capped at 500 USD,Venue access and consulting both evidenced,Net 15 for cash component,2026-10-01,2026-10-31

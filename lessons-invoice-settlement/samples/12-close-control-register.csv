@@ -1,0 +1,4 @@
+invoice_id,contract_checked,cutoff_checked,calculation_reperformed,evidence_checked,acceptance_checked,reviewer,review_date,receipt_or_performance_matched,open_balance_usd,revision_history_retained,close_status,follow_up
+INV-2026-091-R1,Yes,Yes,Yes,Yes,Yes,Riley Patel,2026-10-07,Yes,0,Yes,Closed,None
+INV-2026-102,Yes,Yes,Yes,Yes,Yes,Sam Okafor,2026-10-10,Yes,0,Yes,Closed,Retain withholding certificate
+INV-2026-107,Yes,Yes,Yes,Yes,Yes,Riley Patel,2026-10-12,Partial,800,Yes,Open,Follow up on remaining 800 USD
