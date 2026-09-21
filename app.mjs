@@ -6,7 +6,7 @@ import {
   engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, findTagByName,
   formatMoment, googleWorkspaceKind, invitableUsers, memberFor, naturalJoin, nextReportBlockOrder,
   normalizeBoardRole, cardColorMeta, normalizeCardColor, normalizeEngagementTerms, normalizeHttpUrl, normalizeReportBlocks, normalizeTagIds, normalizeTagName,
-  plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, settlementAssets, settlementHours, sortTasks,
+  plainText, reindexReportBlocks, reportBlockHasContent, REPORT_SLOTS, reportRows, roleCaption, seedMemberships, settlementAssets, settlementHours, invoiceTitle, sortTasks,
   statusToColumnType, taskProgress, toCsv, toggleListValue
 } from "./app-core.mjs";
 import {
@@ -118,7 +118,7 @@ function sanitizeHtml(html) {
 }
 
 let reportSaveTimer = 0;
-let reportLinkContext = { editor: null, range: null };
+let reportLinkContext = { editor: null, range: null, invoiceTaskId: null };
 
 function prepareReportHtml(html) {
   const box = document.createElement("div");
@@ -390,10 +390,12 @@ async function seedTasks(user) {
     ["Map approval workflow", "Finance ops", "medium", "backlog", 1200, -5, [ops?.id], "blue"],
     ["Implement billing summary", "Atlas rollout", "high", "progress", 4800, -4, [billing?.id], "coral"],
     ["Review stakeholder brief", "Atlas rollout", "medium", "progress", 900, -3, [ops?.id], "gold"],
+    ["Confirm billing totals", "Atlas rollout", "medium", "done", 600, -2, [billing?.id], "sage"],
     ["Close August retainers", "Client services", "low", "done", 3200, -8, [billing?.id], "sage"],
     ["Publish migration notes", "Atlas rollout", "medium", "done", 1800, -7, [], "none"]
   ];
   const cache = new Map();
+  const seededIds = Object.fromEntries(seeds.map(([title]) => [title, uuid()]));
   for (const [title, projectName, priority, status, rate, days, tagIds, color] of seeds) {
     if (!cache.has(projectName)) cache.set(projectName, await getOrCreateProject(projectName));
     const project = cache.get(projectName);
@@ -401,12 +403,18 @@ async function seedTasks(user) {
     const column = columns.find((item) => item.type === statusToColumnType(status)) || columns[0];
     const createdAt = new Date(now + days * 86400000).toISOString();
     await put("tasks", {
-      id: uuid(), title, project: project.name, projectId: project.id, columnId: column.id,
+      id: seededIds[title], title, project: project.name, projectId: project.id, columnId: column.id,
       priority, status, rate, ownerId: user.id, ownerName: user.name,
       description: "Seeded workspace task — edit or remove it at any time.",
       createdAt, completedAt: status === "done" ? new Date(now + (days + 2) * 86400000).toISOString() : null,
       timestampOverridden: false, sortOrder: now + days,
-      tagIds: normalizeTagIds(tagIds), color: normalizeCardColor(color)
+      tagIds: normalizeTagIds(tagIds), color: normalizeCardColor(color),
+      invoiceIncluded: title !== "Map approval workflow",
+      invoiceParentId: ["Review stakeholder brief", "Confirm billing totals"].includes(title) ? seededIds["Implement billing summary"] : null,
+      invoiceTitle: title === "Implement billing summary" ? "Billing dashboard implementation" : "",
+      settlementHours: title === "Implement billing summary" ? 12 : title === "Review stakeholder brief" ? 4 : title === "Confirm billing totals" ? 8 : 0,
+      settlementPeriod: title.includes("billing") || title.includes("stakeholder") ? "September 2026" : "",
+      settlementAssets: title === "Implement billing summary" ? [{ name: "Dashboard screenshot", url: "https://drive.google.com/file/d/example-dashboard-screenshot/view" }] : []
     });
   }
 }
@@ -1156,6 +1164,13 @@ function taskDialog() {
           <p class="hint">${locked ? "Files attached to this task." : "Drop files here, or paste images into the description."}</p>
           <ul class="attach-list" id="attach-list"></ul>
         </section>
+        <section class="invoice-task-panel">
+          <header><div><p class="eyebrow">Invoice</p><h3>On the invoice</h3></div></header>
+          <label class="check-line"><input type="checkbox" name="invoiceIncluded" checked ${lock}> Include on invoice</label>
+          <div class="form-grid"><div class="field"><label>Client-facing name</label><input name="invoiceTitle" placeholder="Defaults to task title" ${lock}></div><div class="field"><label>Parent line</label><select name="invoiceParentId" ${lock}><option value="">Top-level line</option></select></div></div>
+          <div class="form-grid"><div class="field"><label>Hours</label><input type="number" min="0" step="0.25" name="settlementHours" placeholder="0" ${lock}></div><div class="field"><label>Billing period</label><input name="settlementPeriod" placeholder="e.g. September 2026" ${lock}></div></div>
+          <fieldset class="settlement-assets" ${locked ? "disabled" : ""}><legend>Invoice evidence</legend><p class="hint">Named proof links appear on this invoice line. Add more evidence from Invoice settlement.</p>${[0,1,2].map((index) => `<div class="settlement-asset-row"><label>Label<input name="assetName${index}" placeholder="e.g. Approved screenshot"></label><label>URL<input name="assetUrl${index}" type="url" placeholder="https://drive.google.com/file/d/…"></label></div>`).join("")}</fieldset>
+        </section>
         <details class="advanced-options" id="advanced-options">
           <summary>Advanced options</summary>
           <div class="form-grid">
@@ -1164,15 +1179,6 @@ function taskDialog() {
           </div>
           <p class="hint">✎ Changing these timestamps marks this task as manually adjusted in reports.</p>
           <div class="field"><label>Settlement amount (USD)</label><input type="number" min="0" step="1" name="rate" placeholder="0" ${lock}></div>
-          <div class="form-grid">
-            <div class="field"><label>Billable hours</label><input type="number" min="0" step="0.25" name="settlementHours" placeholder="0" ${lock}></div>
-            <div class="field"><label>Billing period</label><input name="settlementPeriod" placeholder="e.g. September 2026" ${lock}></div>
-          </div>
-          <fieldset class="settlement-assets" ${locked ? "disabled" : ""}>
-            <legend>Settlement evidence</legend>
-            <p class="hint">Add up to three supporting files, such as a Google Drive screenshot, document, or folder.</p>
-            ${[0, 1, 2].map((index) => `<div class="settlement-asset-row"><label>Label<input name="assetName${index}" placeholder="e.g. Approved screenshot"></label><label>URL<input name="assetUrl${index}" type="url" placeholder="https://drive.google.com/file/d/…"></label></div>`).join("")}
-          </fieldset>
         </details>
       </div>
       <footer class="form-actions">
@@ -1765,6 +1771,10 @@ async function openTask(id) {
     field("createdAt").value = localDateTime(task?.createdAt || new Date().toISOString());
     field("completedAt").value = localDateTime(task?.completedAt);
     field("rate").value = task?.rate || "";
+    field("invoiceIncluded").checked = task?.invoiceIncluded !== false;
+    field("invoiceTitle").value = task?.invoiceTitle || "";
+    field("invoiceParentId").innerHTML = `<option value="">Top-level line</option>${state.tasks.filter((item) => item.id !== task?.id && item.projectId === projectId && !item.invoiceParentId).map((item) => `<option value="${item.id}">${escapeHtml(invoiceTitle(item))}</option>`).join("")}`;
+    field("invoiceParentId").value = task?.invoiceParentId || "";
     field("settlementHours").value = task?.settlementHours || "";
     field("settlementPeriod").value = task?.settlementPeriod || "";
     const assets = Array.isArray(task?.settlementAssets) ? task.settlementAssets : [];
@@ -1869,6 +1879,9 @@ async function saveTask(event) {
     priority: data.get("priority"),
     description,
     rate: Number(data.get("rate")) || 0,
+    invoiceIncluded: data.get("invoiceIncluded") === "on",
+    invoiceTitle: String(data.get("invoiceTitle") || "").trim(),
+    invoiceParentId: String(data.get("invoiceParentId") || "") || null,
     settlementHours: Math.max(0, Number(data.get("settlementHours")) || 0),
     settlementPeriod: String(data.get("settlementPeriod") || "").trim(),
     settlementAssets: [0, 1, 2].map((index) => ({
@@ -2020,7 +2033,7 @@ function invoiceEvidenceMarkup(task) {
   return `<ul class="invoice-evidence">${assets.map((asset) => {
     const label = asset.name || defaultLinkLabel(asset.url);
     const kind = googleWorkspaceKind(asset.url);
-    return `<li><a href="${escapeHtml(asset.url)}" target="_blank" rel="noopener noreferrer" class="${kind ? `report-link-${kind}` : ""}">${escapeHtml(label)}</a></li>`;
+    return `<li><a href="${escapeHtml(asset.url)}" target="_blank" rel="noopener noreferrer" class="${kind ? `report-link-${kind}` : ""}">${escapeHtml(label)}</a>${reportEditing() ? `<button type="button" class="invoice-remove-evidence" data-remove-evidence="${task.id}" data-asset-url="${escapeHtml(asset.url)}" aria-label="Remove ${escapeHtml(label)}">×</button>` : ""}</li>`;
   }).join("")}</ul>`;
 }
 
@@ -2042,7 +2055,7 @@ function reportsView() {
   const editing = reportEditing();
   const table = rows.length
     ? state.report.type === "invoice"
-      ? `<div class="invoice-table-wrap"><table class="invoice-table"><thead><tr><th>Deliverable</th><th>Owner</th><th>Billing period</th><th>Hours</th><th>Evidence</th><th>Amount</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td><td>${escapeHtml(task.settlementPeriod || formatMoment(task.completedAt || task.createdAt, { showDate: true }))}</td><td>${settlementHours(task) || "—"}</td><td>${invoiceEvidenceMarkup(task)}</td><td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="invoice-compose-actions">${editing ? `<button class="button primary" type="button" id="invoice-add-line">Add line</button><button class="button" type="button" id="invoice-add-from-board">Add from board</button>` : ""}</div><div class="invoice-table-wrap"><table class="invoice-table"><thead><tr><th>Deliverable</th><th>Owner</th><th>Billing period</th><th>Hours</th><th>Evidence</th><th>Amount</th>${editing ? "<th>Actions</th>" : ""}</tr></thead><tbody>${rows.map((task) => `<tr data-invoice-row="${task.id}" class="${task.invoiceDepth ? "invoice-subline" : ""}"><td>${editing ? `<input class="invoice-title-input" data-invoice-field="invoiceTitle" data-task="${task.id}" value="${escapeHtml(task.invoiceTitle || task.title)}" aria-label="Client-facing name">` : `<strong>${escapeHtml(invoiceTitle(task))}</strong>`}${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${task.invoiceDepth ? " · Sub-line" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td><td>${editing ? `<input data-invoice-field="settlementPeriod" data-task="${task.id}" value="${escapeHtml(task.settlementPeriod || "")}" placeholder="Billing period">` : escapeHtml(task.settlementPeriod || "—")}</td><td>${editing && !rows.some((item) => item.invoiceParentId === task.id) ? `<input class="invoice-hours-input" type="number" min="0" step=".25" data-invoice-field="settlementHours" data-task="${task.id}" value="${settlementHours(task)}">` : (settlementHours(task) || "—")}</td><td>${invoiceEvidenceMarkup(task)}${editing ? `<button type="button" class="button invoice-add-evidence" data-add-invoice-evidence="${task.id}">Add evidence</button>` : ""}</td><td>${escapeHtml(task.result)}</td>${editing ? `<td class="invoice-row-actions"><button type="button" class="button" data-add-subline="${task.id}">Add sub-line</button><button type="button" class="button ghost danger" data-exclude-invoice="${task.id}">Remove from invoice</button></td>` : ""}</tr>`).join("")}</tbody></table></div>`
       : `<table><thead><tr><th>Work item</th><th>Owner</th>${state.report.showDate || state.report.showTime ? "<th>Reported</th>" : ""}<th>Result</th></tr></thead><tbody>${rows.map((task) => `<tr><td><strong>${escapeHtml(task.title)}</strong>${state.report.showDetails ? `<br><small>${escapeHtml(task.project)}${plainText(task.description) ? ` — ${escapeHtml(plainText(task.description))}` : ""}${task.timestampOverridden ? " · ✎ adjusted" : ""}</small>` : ""}</td><td>${escapeHtml(task.ownerName)}</td>${state.report.showDate || state.report.showTime ? `<td>${formatMoment(task.completedAt || task.createdAt, state.report)}</td>` : ""}<td>${escapeHtml(task.result)}</td></tr>`).join("")}</tbody></table>`
     : `<div class="empty">No work matches this report yet. ${selected.length ? "" : "Select at least one project."}</div>`;
   return `<main class="main">
@@ -2065,7 +2078,7 @@ function reportsView() {
       </aside>
       <article class="report-sheet ${editing ? "is-editing" : ""}" data-report-type="${state.report.type}">
         ${editing ? `<div class="report-edit-bar">
-          <p class="hint">Add formatted notes, pasted pictures, or Google Drive / Docs links above, between, or below these sections. They stay on this lens after you leave edit mode.</p>
+          <p class="hint">Edit invoice lines, hours, hierarchy, and proof here. “Add evidence” attaches a Drive, Docs, screenshot, or web link to that line. Add note rails are for sheet cover notes only.</p>
           <button type="button" class="button" id="done-report-edit">Done</button>
         </div>` : ""}
         ${reportSlotMarkup("start", editing)}
@@ -2199,8 +2212,10 @@ function bindReportLinkDialog() {
       return;
     }
     const editor = reportLinkContext.editor;
+    const invoiceTaskId = reportLinkContext.invoiceTaskId;
     dialog.close();
-    if (editor) insertReportLinkAt(editor, url, label);
+    if (invoiceTaskId) addInvoiceEvidence(invoiceTaskId, url, label);
+    else if (editor) insertReportLinkAt(editor, url, label);
   };
 }
 
@@ -2240,8 +2255,47 @@ async function removeReportBlock(id) {
   render();
 }
 
+async function patchInvoiceTask(id, patch) {
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task || !canEdit()) return;
+  await put("tasks", { ...task, ...patch });
+  await refresh();
+}
+
+async function addInvoiceEvidence(id, rawUrl, name) {
+  const task = state.tasks.find((item) => item.id === id);
+  const url = normalizeHttpUrl(rawUrl);
+  if (!task || !url) return;
+  await patchInvoiceTask(id, { settlementAssets: [...settlementAssets(task), { name: name || defaultLinkLabel(url), url }] });
+  toast("Evidence added to invoice line");
+}
+
+function openInvoiceEvidence(id) {
+  reportLinkContext = { editor: null, range: null, invoiceTaskId: id };
+  const form = document.querySelector("#report-link-form");
+  form.reset();
+  document.querySelector("#report-link-dialog").showModal();
+  form.elements.url.focus();
+}
+
+async function createInvoiceLine(parentId = null) {
+  const parent = state.tasks.find((item) => item.id === parentId);
+  const project = parent ? state.projects.find((item) => item.id === parent.projectId) : state.projects.find((item) => includedProjectIds().includes(item.id));
+  if (!project) return toast("Select a project first");
+  const column = state.columns.find((item) => item.projectId === project.id && item.type === "todo") || state.columns.find((item) => item.projectId === project.id);
+  const task = { id: uuid(), title: parent ? "New sub-line" : "New invoice line", invoiceTitle: parent ? "New sub-line" : "New invoice line", invoiceIncluded: true, invoiceParentId: parentId, project: project.name, projectId: project.id, columnId: column.id, ownerId: state.user.id, ownerName: state.user.name, status: columnTypeToStatus(column.type), priority: "medium", description: "", rate: 0, settlementHours: 0, settlementPeriod: "", settlementAssets: [], createdAt: new Date().toISOString(), completedAt: null, sortOrder: Date.now(), tagIds: [], color: "none" };
+  await put("tasks", task); await refresh();
+}
+
 function bindReports() {
   bindReportLinkDialog();
+  document.querySelectorAll("[data-invoice-field]").forEach((input) => input.onchange = () => patchInvoiceTask(input.dataset.task, { [input.dataset.invoiceField]: input.type === "number" ? Math.max(0, Number(input.value) || 0) : input.value.trim() }));
+  document.querySelectorAll("[data-add-invoice-evidence]").forEach((button) => button.onclick = () => openInvoiceEvidence(button.dataset.addInvoiceEvidence));
+  document.querySelectorAll("[data-remove-evidence]").forEach((button) => button.onclick = () => { const task = state.tasks.find((item) => item.id === button.dataset.removeEvidence); patchInvoiceTask(task.id, { settlementAssets: settlementAssets(task).filter((asset) => asset.url !== button.dataset.assetUrl) }); });
+  document.querySelectorAll("[data-exclude-invoice]").forEach((button) => button.onclick = () => patchInvoiceTask(button.dataset.excludeInvoice, { invoiceIncluded: false }));
+  document.querySelectorAll("[data-add-subline]").forEach((button) => button.onclick = () => createInvoiceLine(button.dataset.addSubline));
+  document.querySelector("#invoice-add-line")?.addEventListener("click", () => createInvoiceLine());
+  document.querySelector("#invoice-add-from-board")?.addEventListener("click", async () => { const task = state.tasks.find((item) => item.invoiceIncluded === false && includedProjectIds().includes(item.projectId)); if (!task) return toast("No excluded Board tasks to add"); await patchInvoiceTask(task.id, { invoiceIncluded: true }); });
   document.querySelectorAll("[data-report]").forEach((button) => button.onclick = () => {
     state.report.type = button.dataset.report;
     if (button.dataset.report === "invoice") state.report.showTime = false;
@@ -2262,7 +2316,7 @@ function bindReports() {
     closeActionMenus();
     const rows = reportRows(state.tasks, state.report.type, { projectIds: includedProjectIds() });
     const columns = [
-      { label: "Task", value: (row) => row.title },
+      { label: state.report.type === "invoice" ? "Deliverable" : "Task", value: (row) => state.report.type === "invoice" ? `${"  ".repeat(row.invoiceDepth || 0)}${invoiceTitle(row)}` : row.title },
       { label: "Project", value: (row) => row.project },
       { label: "Owner", value: (row) => row.ownerName },
       ...(state.report.type === "invoice" ? [

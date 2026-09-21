@@ -7,7 +7,7 @@ import {
   reportBlockHasContent, reportRows, roleCaption, seedMemberships, statusToColumnType, blocksForSlot, defaultLinkLabel,
   googleWorkspaceKind, reindexReportBlocks, emptyBoardFilters, boardFiltersActive, normalizeTagName, toggleListValue,
   ENGAGEMENT_TERMS, engagementCashAmount, engagementIsCashSettlement, engagementTermsLabel, engagementWorkTimingLabel, normalizeEngagementTerms,
-  settlementAssets, settlementHours
+  settlementAssets, settlementHours, invoiceTitle
 } from "../app-core.mjs";
 
 const tasks = [
@@ -21,10 +21,25 @@ test("report rows honor an explicit project checkbox set", () => {
   assert.equal(reportRows(tasks, "stakeholder", { projectIds: [] }).length, 0);
 });
 
-test("invoice report still only includes complete work after project filter", () => {
-  const rows = reportRows(tasks, "invoice", { projectIds: ["p1", "p2"] });
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].title, "Close books");
+test("invoice includes every status by default and omits explicitly excluded work", () => {
+  const rows = reportRows([...tasks, { ...tasks[0], id: "x", invoiceIncluded: false }], "invoice", { projectIds: ["p1", "p2"] });
+  assert.deepEqual(rows.map((row) => row.id), ["a", "b"]);
+});
+
+test("invoice uses client names, nests sub-lines, and rolls child hours into parents", () => {
+  const items = [
+    { ...tasks[0], id: "parent", invoiceTitle: "Client deliverable", settlementHours: 99 },
+    { ...tasks[1], id: "child-1", invoiceParentId: "parent", settlementHours: 2 },
+    { ...tasks[1], id: "child-2", invoiceParentId: "parent", settlementHours: 3 }
+  ];
+  const rows = reportRows(items, "invoice");
+  assert.equal(invoiceTitle(rows[0]), "Client deliverable");
+  assert.equal(rows[0].settlementHours, 5);
+  assert.deepEqual(rows.map((row) => row.invoiceDepth), [0, 1, 1]);
+});
+
+test("invoice evidence normalizes URLs and filters incomplete assets", () => {
+  assert.deepEqual(settlementAssets({ settlementAssets: [{ name: " Shot ", url: "drive.google.com/file/1" }, { name: "No URL" }] }), [{ name: "Shot", url: "https://drive.google.com/file/1" }]);
 });
 
 test("search strips rich text tags", () => {
