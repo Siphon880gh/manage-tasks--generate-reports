@@ -262,6 +262,15 @@ try {
   check("report edit mode on", await page.locator(".report-sheet.is-editing").count() === 1);
   check("insert rails between sections", await page.locator(".report-insert").count() >= 4);
   check("google drive hint", (await page.locator(".report-edit-bar").innerText()).toLowerCase().includes("google"));
+  check("in-progress work is included", await page.locator('[data-invoice-row]').count() >= 2);
+  check("seeded sub-line is nested", await page.locator(".invoice-subline").count() >= 2);
+  const evidenceRow = page.locator("[data-invoice-row]").first();
+  await evidenceRow.locator("[data-add-invoice-evidence]").click();
+  await page.locator("#report-link-url").fill("https://drive.google.com/file/d/verify-screenshot/view");
+  await page.locator("#report-link-label").fill("Verification screenshot");
+  await page.locator("#report-link-form button[type=submit]").click();
+  await page.waitForSelector('a:has-text("Verification screenshot")');
+  check("row evidence is visible", await page.locator('a:has-text("Verification screenshot")').count() === 1);
   await page.locator('[data-report-slot="after-stats"]:not([data-after])').click();
   await page.waitForSelector("[data-report-block]");
   const note = page.locator("[data-report-block]").first();

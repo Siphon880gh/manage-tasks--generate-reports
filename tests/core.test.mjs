@@ -11,8 +11,11 @@ test("filters across searchable fields and exact facets", () => {
   assert.equal(filterTasks(tasks, { query: "finance" }).length, 1);
   assert.equal(filterTasks(tasks, { owner: "2", project: "Atlas" })[0].title, "Build brief");
 });
-test("invoice report includes only complete settlement work", () => {
-  const rows = reportRows(tasks, "invoice"); assert.equal(rows.length, 1); assert.equal(rows[0].result, "$1,200");
+test("invoice report includes work in every status unless excluded", () => {
+  const rows = reportRows(tasks, "invoice");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].result, "$1,200");
+  assert.equal(reportRows([...tasks, { ...tasks[0], invoiceIncluded: false }], "invoice").length, 2);
 });
 test("stakeholder report translates status into outcomes", () => assert.equal(reportRows(tasks, "stakeholder")[1].result, "In flight"));
 test("progress is calculated safely", () => { assert.equal(taskProgress(tasks), 50); assert.equal(taskProgress([]), 0); });
